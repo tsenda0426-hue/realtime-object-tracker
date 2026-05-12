@@ -55,8 +55,9 @@
 # 1. 依存ライブラリのパスを設定してCMake configure
 cmake -B build -G "Visual Studio 17 2022" -A x64 ^
   -DONNXRUNTIME_ROOT="C:/onnxruntime-win-x64-gpu-1.17.0" ^
-  -DOpenCV_DIR="C:/opencv/build" ^
   -DUSE_CUDA=ON
+# OpenCVが未インストールの場合はFetchContentで自動ダウンロードされます。
+# 既にインストール済みの場合は -DOpenCV_DIR="C:/opencv/build" を追加してください。
 
 # 2. ビルド
 cmake --build build --config Release

@@ -64,7 +64,64 @@ endif()
 if(OPENCV_DIR AND EXISTS "${OPENCV_DIR}")
     set(OpenCV_DIR "${OPENCV_DIR}")
 endif()
-find_package(OpenCV REQUIRED COMPONENTS core imgproc)
+find_package(OpenCV QUIET COMPONENTS core imgproc)
+
+if(NOT OpenCV_FOUND)
+    message(STATUS "OpenCV not found locally – fetching via FetchContent …")
+    # Disable unnecessary OpenCV modules to speed up the build
+    set(BUILD_LIST "core,imgproc" CACHE STRING "" FORCE)
+    set(BUILD_opencv_apps     OFF CACHE BOOL "" FORCE)
+    set(BUILD_opencv_calib3d  OFF CACHE BOOL "" FORCE)
+    set(BUILD_opencv_dnn      OFF CACHE BOOL "" FORCE)
+    set(BUILD_opencv_features2d OFF CACHE BOOL "" FORCE)
+    set(BUILD_opencv_flann    OFF CACHE BOOL "" FORCE)
+    set(BUILD_opencv_gapi     OFF CACHE BOOL "" FORCE)
+    set(BUILD_opencv_highgui  OFF CACHE BOOL "" FORCE)
+    set(BUILD_opencv_java     OFF CACHE BOOL "" FORCE)
+    set(BUILD_opencv_js       OFF CACHE BOOL "" FORCE)
+    set(BUILD_opencv_ml       OFF CACHE BOOL "" FORCE)
+    set(BUILD_opencv_objdetect OFF CACHE BOOL "" FORCE)
+    set(BUILD_opencv_photo    OFF CACHE BOOL "" FORCE)
+    set(BUILD_opencv_python3  OFF CACHE BOOL "" FORCE)
+    set(BUILD_opencv_stitching OFF CACHE BOOL "" FORCE)
+    set(BUILD_opencv_ts       OFF CACHE BOOL "" FORCE)
+    set(BUILD_opencv_video    OFF CACHE BOOL "" FORCE)
+    set(BUILD_opencv_videoio  OFF CACHE BOOL "" FORCE)
+    set(BUILD_TESTS           OFF CACHE BOOL "" FORCE)
+    set(BUILD_PERF_TESTS      OFF CACHE BOOL "" FORCE)
+    set(BUILD_EXAMPLES        OFF CACHE BOOL "" FORCE)
+    set(BUILD_DOCS            OFF CACHE BOOL "" FORCE)
+    set(BUILD_WITH_STATIC_CRT OFF CACHE BOOL "" FORCE)
+    set(BUILD_SHARED_LIBS     OFF CACHE BOOL "" FORCE)
+    set(OPENCV_GENERATE_PKGCONFIG OFF CACHE BOOL "" FORCE)
+    set(WITH_FFMPEG           OFF CACHE BOOL "" FORCE)
+    set(WITH_GSTREAMER        OFF CACHE BOOL "" FORCE)
+    set(WITH_GTK              OFF CACHE BOOL "" FORCE)
+    set(WITH_VTK              OFF CACHE BOOL "" FORCE)
+    set(WITH_OPENEXR          OFF CACHE BOOL "" FORCE)
+    set(WITH_JASPER           OFF CACHE BOOL "" FORCE)
+    set(WITH_PROTOBUF         OFF CACHE BOOL "" FORCE)
+    set(WITH_QUIRC            OFF CACHE BOOL "" FORCE)
+
+    FetchContent_Declare(
+        opencv
+        GIT_REPOSITORY https://github.com/opencv/opencv.git
+        GIT_TAG        4.10.0
+        GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(opencv)
+
+    set(OpenCV_INCLUDE_DIRS
+        "${opencv_SOURCE_DIR}/include"
+        "${opencv_SOURCE_DIR}/modules/core/include"
+        "${opencv_SOURCE_DIR}/modules/imgproc/include"
+        "${opencv_BINARY_DIR}"
+    )
+    set(OpenCV_LIBS opencv_core opencv_imgproc)
+    message(STATUS "OpenCV fetched and configured (core + imgproc only)")
+else()
+    message(STATUS "OpenCV found: ${OpenCV_VERSION}")
+endif()
 
 # ─────────────────────────────────────────────
 # Windows SDK (DXGI, D3D11, XInput)
@@ -135,11 +192,24 @@ endif()
 target_compile_definitions(${PROJECT_NAME} PRIVATE UNICODE _UNICODE)
 
 # MSVC-specific flags
+# NOTE: /O2 and /RTC1 conflict; use generator expressions so optimization
+#       flags only apply in Release and RelWithDebInfo configurations.
 if(MSVC)
-    target_compile_options(${PROJECT_NAME} PRIVATE /W4 /O2 /fp:fast /arch:AVX2)
+    target_compile_options(${PROJECT_NAME} PRIVATE
+        /W4 /fp:fast /arch:AVX2
+        $<$<CONFIG:Release>:/O2 /DNDEBUG>
+        $<$<CONFIG:RelWithDebInfo>:/O2 /DNDEBUG>
+    )
+    # Remove default /RTC1 from Debug flags to avoid conflicts if user
+    # switches to Release later in the same CMake cache.
+    string(REPLACE "/RTC1" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
     target_link_options(${PROJECT_NAME} PRIVATE /SUBSYSTEM:CONSOLE)
 else()
-    target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -O3 -mavx2)
+    target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -mavx2
+        $<$<CONFIG:Release>:-O3>
+        $<$<CONFIG:RelWithDebInfo>:-O2 -g>
+        $<$<CONFIG:Debug>:-O0 -g>
+    )
 endif()
 
 # ─────────────────────────────────────────────
