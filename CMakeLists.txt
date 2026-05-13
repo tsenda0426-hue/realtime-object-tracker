@@ -304,12 +304,32 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE UNICODE _UNICODE)
 # Compiler-specific flags
 # ─────────────────────────────────────────────
 if(MSVC)
+    # Aggressively strip /RTC1 and /Od from ALL default CMake flag variables.
+    # CLion and some CMake generators inject these for Debug, which conflicts
+    # with /O2. We remove them globally and only add optimization for Release.
+    foreach(_flag_var
+        CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
+        CMAKE_CXX_FLAGS_RELWITHDEBINFO CMAKE_CXX_FLAGS_MINSIZEREL
+        CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
+        CMAKE_C_FLAGS_RELWITHDEBINFO CMAKE_C_FLAGS_MINSIZEREL)
+        if(${_flag_var})
+            string(REPLACE "/RTC1" "" ${_flag_var} "${${_flag_var}}")
+            string(REPLACE "/Od"   "" ${_flag_var} "${${_flag_var}}")
+            string(REPLACE "/O2"   "" ${_flag_var} "${${_flag_var}}")
+            string(REPLACE "/O1"   "" ${_flag_var} "${${_flag_var}}")
+            # Clean up double spaces
+            string(REGEX REPLACE "  +" " " ${_flag_var} "${${_flag_var}}")
+            string(STRIP "${${_flag_var}}" ${_flag_var})
+        endif()
+    endforeach()
+
     target_compile_options(${PROJECT_NAME} PRIVATE
-        /W4 /fp:fast /arch:AVX2
-        $<$<CONFIG:Release>:/O2 /DNDEBUG>
-        $<$<CONFIG:RelWithDebInfo>:/O2 /DNDEBUG>
+        /W4
+        $<$<CONFIG:Debug>:/Od /Zi>
+        $<$<CONFIG:Release>:/O2 /fp:fast /arch:AVX2 /DNDEBUG>
+        $<$<CONFIG:RelWithDebInfo>:/O2 /fp:fast /arch:AVX2 /Zi /DNDEBUG>
+        $<$<CONFIG:MinSizeRel>:/O1 /DNDEBUG>
     )
-    string(REPLACE "/RTC1" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
     target_link_options(${PROJECT_NAME} PRIVATE /SUBSYSTEM:CONSOLE)
 elseif(MINGW)
     target_compile_options(${PROJECT_NAME} PRIVATE
