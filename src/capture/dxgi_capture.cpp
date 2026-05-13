@@ -132,7 +132,7 @@ bool DxgiCapture::acquire_frame(CapturedFrame& out) {
     }
     if (FAILED(hr)) {
         // Output may have been invalidated (resolution change, etc.)
-        std::fprintf(stderr, "[DxgiCapture] AcquireNextFrame failed: 0x%08lx – reinitializing\n", hr);
+        std::fprintf(stderr, "[DxgiCapture] AcquireNextFrame failed: 0x%08lx - reinitializing\n", hr);
         duplication_.Reset();
         create_duplication();
         create_staging_texture();

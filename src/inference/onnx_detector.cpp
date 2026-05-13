@@ -98,7 +98,7 @@ void OnnxDetector::preprocess(const uint8_t* bgra_data,
     cv::Mat bgra(img_height, img_width, CV_8UC4,
                  const_cast<uint8_t*>(bgra_data), img_stride);
 
-    // BGRA → RGB
+    // BGRA -> RGB
     cv::Mat rgb;
     cv::cvtColor(bgra, rgb, cv::COLOR_BGRA2RGB);
 
@@ -118,7 +118,7 @@ void OnnxDetector::preprocess(const uint8_t* bgra_data,
     const int dy = (input_size_ - new_h) / 2;
     resized.copyTo(padded(cv::Rect(dx, dy, new_w, new_h)));
 
-    // HWC → CHW, normalize to [0,1]
+    // HWC -> CHW, normalize to [0,1]
     blob.resize(static_cast<size_t>(3 * input_size_ * input_size_));
     const int area = input_size_ * input_size_;
     for (int y = 0; y < input_size_; ++y) {
@@ -181,7 +181,7 @@ std::vector<Detection> OnnxDetector::postprocess(
 
     if (num_classes <= 0) return detections;
 
-    // Scale factors (letterbox → original image)
+    // Scale factors (letterbox -> original image)
     const float scale = std::min(
         static_cast<float>(input_size_) / static_cast<float>(orig_w),
         static_cast<float>(input_size_) / static_cast<float>(orig_h)

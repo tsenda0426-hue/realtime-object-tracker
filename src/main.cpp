@@ -27,9 +27,9 @@ void signal_handler(int) {
 
 } // anonymous namespace
 
-// ═══════════════════════════════════════════════════════════════════════
+// =======================================================================
 //  Thread 1: Screen Capture (DXGI)
-// ═══════════════════════════════════════════════════════════════════════
+// =======================================================================
 static void capture_thread(
         tracker::DxgiCapture& capture,
         tracker::RingBuffer<tracker::CapturedFrame, 4>& frame_queue,
@@ -43,7 +43,7 @@ static void capture_thread(
             // Drop oldest if queue is full (triple-buffering style)
             frame_queue.try_push(frame);
         } else {
-            // No new frame – yield briefly to avoid busy-spinning
+            // No new frame - yield briefly to avoid busy-spinning
             std::this_thread::sleep_for(std::chrono::microseconds(200));
         }
     }
@@ -51,9 +51,9 @@ static void capture_thread(
     std::printf("[CaptureThread] Stopped\n");
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// =======================================================================
 //  Thread 2: AI Inference (ONNX Runtime / CUDA)
-// ═══════════════════════════════════════════════════════════════════════
+// =======================================================================
 struct DetectionResult {
     std::vector<tracker::Detection> detections;
     uint64_t                        frame_id;
@@ -88,9 +88,9 @@ static void inference_thread(
     std::printf("[InferenceThread] Stopped\n");
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// =======================================================================
 //  Thread 3: Tracking + Input Control (main control loop)
-// ═══════════════════════════════════════════════════════════════════════
+// =======================================================================
 static void control_thread(
         tracker::KalmanTracker& kalman,
         tracker::GamepadController& gamepad,
@@ -119,7 +119,7 @@ static void control_thread(
         const double dt = std::chrono::duration<double>(now - prev_time).count();
         prev_time = now;
 
-        // ── Process latest detections ──
+        // -- Process latest detections --
         DetectionResult det_result;
         bool has_detection = false;
         // Drain queue: keep only the newest result
@@ -137,11 +137,11 @@ static void control_thread(
             kalman.increment_lost();
         }
 
-        // ── Kalman predict ──
+        // -- Kalman predict --
         kalman.predict(dt);
         auto predicted = kalman.get_prediction(cfg.prediction_steps, dt);
 
-        // ── Compute AI correction ──
+        // -- Compute AI correction --
         float raw_rx = 0.0f;
         float raw_ry = 0.0f;
 
@@ -156,8 +156,8 @@ static void control_thread(
                 float nx = ex / dist;
                 float ny = ey / dist;
 
-                // Non-linear decay: output ∝ dist^decay_exp / dist_max^decay_exp
-                // Closer to target → exponentially weaker output → no overshoot
+                // Non-linear decay: output ~ dist^decay_exp / dist_max^decay_exp
+                // Closer to target -> exponentially weaker output -> no overshoot
                 const float dist_max = cx;  // max meaningful distance
                 float normalized_dist = std::min(dist / dist_max, 1.0f);
                 float strength = std::pow(normalized_dist, decay_exp);
@@ -183,12 +183,12 @@ static void control_thread(
         int16_t ai_rx = clamp16(ema_rx);
         int16_t ai_ry = clamp16(ema_ry);
 
-        // ── Read physical pad & submit to virtual ──
+        // -- Read physical pad & submit to virtual --
         tracker::GamepadState phys{};
         gamepad.poll_physical(phys);
         gamepad.submit_virtual(phys, ai_rx, ai_ry);
 
-        // ── Telemetry (periodic) ──
+        // -- Telemetry (periodic) --
         if ((tick++ % 500) == 0) {
             auto state = kalman.get_state();
             std::printf("[Control] target=(%.1f,%.1f) vel=(%.1f,%.1f) "
@@ -205,17 +205,17 @@ static void control_thread(
     std::printf("[ControlThread] Stopped\n");
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// =======================================================================
 //  main()
-// ═══════════════════════════════════════════════════════════════════════
+// =======================================================================
 int main(int argc, char* argv[]) {
     std::signal(SIGINT,  signal_handler);
     std::signal(SIGTERM, signal_handler);
 
-    std::printf("═══════════════════════════════════════════════════════\n");
+    std::printf("=======================================================\n");
     std::printf("  Realtime Object Tracker & Adaptive Input System\n");
     std::printf("  Industrial / Military Grade Architecture\n");
-    std::printf("═══════════════════════════════════════════════════════\n\n");
+    std::printf("=======================================================\n\n");
 
     tracker::SystemConfig cfg;
 
@@ -224,7 +224,7 @@ int main(int argc, char* argv[]) {
         cfg.model_path = argv[1];
     }
 
-    // ── Initialize modules ──
+    // -- Initialize modules --
     std::printf("[Main] Initializing capture module...\n");
     tracker::DxgiCapture capture;
     if (!capture.initialize(cfg.capture_region)) {
@@ -251,18 +251,18 @@ int main(int argc, char* argv[]) {
     std::printf("[Main] Initializing gamepad controller...\n");
     tracker::GamepadController gamepad;
     if (!gamepad.initialize()) {
-        std::fprintf(stderr, "[Main] WARNING: Gamepad initialization failed – "
+        std::fprintf(stderr, "[Main] WARNING: Gamepad initialization failed - "
                              "running in detection-only mode\n");
     }
 
     std::printf("[Main] Initializing Kalman tracker...\n");
     tracker::KalmanTracker kalman;
 
-    // ── Inter-thread queues (lock-free, power-of-2 capacity) ──
+    // -- Inter-thread queues (lock-free, power-of-2 capacity) --
     tracker::RingBuffer<tracker::CapturedFrame, 4> frame_queue;
     tracker::RingBuffer<DetectionResult, 4>        detection_queue;
 
-    // ── Launch threads ──
+    // -- Launch threads --
     std::printf("[Main] Launching pipeline threads...\n\n");
 
     std::thread t_capture(capture_thread,
@@ -281,20 +281,20 @@ int main(int argc, char* argv[]) {
                           std::ref(detection_queue),
                           std::cref(cfg));
 
-    // ── Main thread: status monitor ──
+    // -- Main thread: status monitor --
     while (g_running.load(std::memory_order_acquire)) {
         std::this_thread::sleep_for(std::chrono::seconds(5));
-        std::printf("[Main] System running – press Ctrl+C to stop\n");
+        std::printf("[Main] System running - press Ctrl+C to stop\n");
     }
 
     std::printf("\n[Main] Shutting down...\n");
 
-    // ── Join threads ──
+    // -- Join threads --
     if (t_capture.joinable())   t_capture.join();
     if (t_inference.joinable()) t_inference.join();
     if (t_control.joinable())   t_control.join();
 
-    // ── Cleanup ──
+    // -- Cleanup --
     gamepad.shutdown();
     capture.shutdown();
 

@@ -66,7 +66,7 @@ struct SystemConfig {
     float smoothing_alpha        = 0.35f;   // EMA alpha
     float decay_exponent         = 2.0f;    // non-linear decay power
     float max_correction_speed   = 20000.0f; // max stick deflection per sec
-    float deadzone_radius        = 5.0f;    // pixels – below this, no correction
+    float deadzone_radius        = 5.0f;    // pixels - below this, no correction
 };
 
 } // namespace tracker

@@ -17,11 +17,15 @@ set(ONNXRUNTIME_ROOT "" CACHE PATH "Root directory of ONNX Runtime SDK")
 set(VIGEMCLIENT_ROOT "" CACHE PATH "Root directory of ViGEmClient SDK")
 set(OPENCV_DIR       "" CACHE PATH "OpenCV CMake config directory")
 
-# Detect compiler
+# Detect compiler and set global encoding flags
 if(MINGW)
     message(STATUS "Compiler: MinGW (GCC/G++)")
 elseif(MSVC)
     message(STATUS "Compiler: MSVC")
+    # Force UTF-8 source and execution character sets globally.
+    # Without this, Japanese Windows (code page 932) misinterprets UTF-8
+    # source files, causing cascading C2530/C2143/C4430 compile errors.
+    add_compile_options(/utf-8)
 endif()
 
 # ─────────────────────────────────────────────

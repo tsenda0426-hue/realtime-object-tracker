@@ -4,7 +4,7 @@
 
 namespace tracker {
 
-// ── Matrix utility implementations ──────────────────────────────────
+// -- Matrix utility implementations ----------------------------------
 void KalmanTracker::mat_multiply(const float* A, const float* B, float* C,
                                   int m, int n, int p) {
     for (int i = 0; i < m; ++i) {
@@ -57,7 +57,7 @@ void KalmanTracker::mat_zero(float* M, int rows, int cols) {
     std::memset(M, 0, sizeof(float) * static_cast<size_t>(rows * cols));
 }
 
-// ── Constructor ─────────────────────────────────────────────────────
+// -- Constructor -----------------------------------------------------
 KalmanTracker::KalmanTracker() {
     reset();
 }
@@ -107,12 +107,12 @@ void KalmanTracker::predict(double dt) {
     // ay = ay
     float F[STATE_DIM * STATE_DIM];
     mat_identity(F, STATE_DIM);
-    F[0 * STATE_DIM + 2] = t;    // x  ← vx
-    F[0 * STATE_DIM + 4] = t2;   // x  ← ax
-    F[1 * STATE_DIM + 3] = t;    // y  ← vy
-    F[1 * STATE_DIM + 5] = t2;   // y  ← ay
-    F[2 * STATE_DIM + 4] = t;    // vx ← ax
-    F[3 * STATE_DIM + 5] = t;    // vy ← ay
+    F[0 * STATE_DIM + 2] = t;    // x  <- vx
+    F[0 * STATE_DIM + 4] = t2;   // x  <- ax
+    F[1 * STATE_DIM + 3] = t;    // y  <- vy
+    F[1 * STATE_DIM + 5] = t2;   // y  <- ay
+    F[2 * STATE_DIM + 4] = t;    // vx <- ax
+    F[3 * STATE_DIM + 5] = t;    // vy <- ay
 
     // x_pred = F * x
     float x_pred[STATE_DIM];

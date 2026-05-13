@@ -30,12 +30,12 @@ public:
                                   int img_stride);
 
 private:
-    // Pre-process: resize + normalize + HWC→CHW + BGR→RGB
+    // Pre-process: resize + normalize + HWC->CHW + BGR->RGB
     void preprocess(const uint8_t* bgra_data,
                     int img_width, int img_height, int img_stride,
                     std::vector<float>& blob);
 
-    // Post-process YOLOv8 raw output → detections
+    // Post-process YOLOv8 raw output -> detections
     std::vector<Detection> postprocess(const float* output_data,
                                        const std::vector<int64_t>& output_shape,
                                        int orig_w, int orig_h);
