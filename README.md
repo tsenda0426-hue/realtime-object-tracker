@@ -42,9 +42,9 @@
 
 | ライブラリ | 入手先 |
 |-----------|--------|
-| ONNX Runtime GPU | https://github.com/microsoft/onnxruntime/releases |
-| OpenCV 4.x | https://opencv.org/releases/ |
-| ViGEmClient | https://github.com/ViGEm/ViGEmClient (FetchContentで自動取得) |
+| ONNX Runtime GPU | FetchContentで自動取得 (手動: https://github.com/microsoft/onnxruntime/releases) |
+| OpenCV 4.x | FetchContentで自動取得 (手動: https://opencv.org/releases/) |
+| ViGEmClient | FetchContentで自動取得 |
 | ViGEmBus Driver | https://github.com/ViGEm/ViGEmBus/releases (要インストール) |
 | CUDA Toolkit | https://developer.nvidia.com/cuda-downloads |
 | YOLOv8 ONNX | Ultralytics等でエクスポート |
@@ -52,12 +52,12 @@
 ## ビルド手順
 
 ```powershell
-# 1. 依存ライブラリのパスを設定してCMake configure
-cmake -B build -G "Visual Studio 17 2022" -A x64 ^
-  -DONNXRUNTIME_ROOT="C:/onnxruntime-win-x64-gpu-1.17.0" ^
-  -DUSE_CUDA=ON
-# OpenCVが未インストールの場合はFetchContentで自動ダウンロードされます。
-# 既にインストール済みの場合は -DOpenCV_DIR="C:/opencv/build" を追加してください。
+# 1. CMake configure (全依存ライブラリは自動ダウンロードされます)
+cmake -B build -G "Visual Studio 17 2022" -A x64 -DUSE_CUDA=ON
+# 初回はONNX Runtime SDK (~300MB)とOpenCVのダウンロード+ビルドで数分かかります。
+# 既にローカルにある場合は以下で高速化できます:
+#   -DONNXRUNTIME_ROOT="C:/onnxruntime-win-x64-gpu-1.22.0"
+#   -DOpenCV_DIR="C:/opencv/build"
 
 # 2. ビルド
 cmake --build build --config Release

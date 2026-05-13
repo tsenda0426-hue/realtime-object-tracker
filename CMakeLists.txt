@@ -44,18 +44,42 @@ endif()
 # ─────────────────────────────────────────────
 # ONNX Runtime
 # ─────────────────────────────────────────────
+set(ONNXRUNTIME_VERSION "1.22.0" CACHE STRING "ONNX Runtime version to download")
+
 if(ONNXRUNTIME_ROOT AND EXISTS "${ONNXRUNTIME_ROOT}")
+    # User provided a local SDK path
     set(ONNXRUNTIME_INCLUDE_DIR "${ONNXRUNTIME_ROOT}/include")
     find_library(ONNXRUNTIME_LIB
         NAMES onnxruntime
         PATHS "${ONNXRUNTIME_ROOT}/lib"
     )
+    message(STATUS "ONNX Runtime: using local SDK at ${ONNXRUNTIME_ROOT}")
 else()
-    message(FATAL_ERROR
-        "ONNX Runtime SDK path not set. "
-        "Please specify -DONNXRUNTIME_ROOT=<path> pointing to the extracted "
-        "onnxruntime-win-x64-gpu-<version> directory."
+    # Auto-download pre-built ONNX Runtime GPU SDK
+    message(STATUS "ONNX Runtime not specified – downloading v${ONNXRUNTIME_VERSION} GPU SDK …")
+    if(WIN32)
+        set(_ORT_ARCHIVE "onnxruntime-win-x64-gpu-${ONNXRUNTIME_VERSION}.zip")
+        set(_ORT_URL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/${_ORT_ARCHIVE}")
+    else()
+        set(_ORT_ARCHIVE "onnxruntime-linux-x64-gpu-${ONNXRUNTIME_VERSION}.tgz")
+        set(_ORT_URL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/${_ORT_ARCHIVE}")
+    endif()
+
+    FetchContent_Declare(
+        onnxruntime_sdk
+        URL      "${_ORT_URL}"
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     )
+    FetchContent_MakeAvailable(onnxruntime_sdk)
+
+    set(ONNXRUNTIME_ROOT "${onnxruntime_sdk_SOURCE_DIR}")
+    set(ONNXRUNTIME_INCLUDE_DIR "${ONNXRUNTIME_ROOT}/include")
+    find_library(ONNXRUNTIME_LIB
+        NAMES onnxruntime
+        PATHS "${ONNXRUNTIME_ROOT}/lib"
+        NO_DEFAULT_PATH
+    )
+    message(STATUS "ONNX Runtime SDK downloaded to: ${ONNXRUNTIME_ROOT}")
 endif()
 
 # ─────────────────────────────────────────────
