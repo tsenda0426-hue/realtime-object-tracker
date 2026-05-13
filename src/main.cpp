@@ -134,27 +134,27 @@ struct TrackedTarget {
 //  System configuration (all tuning constants in one place)
 // ====================================================================
 struct SystemConfig {
-    // Capture region (centered on screen, wider for far tracking)
-    int capture_width   = 600;
-    int capture_height  = 600;
+    // Capture region (centered on screen, maximum coverage)
+    int capture_width   = 800;
+    int capture_height  = 800;
     int capture_offset_x = 0;   // computed at runtime
     int capture_offset_y = 0;
 
     // RT-DETR inference
     const char* model_path     = "rtdetr.onnx";
     int   infer_input_size     = 640;
-    float confidence_threshold = 0.30f;  // lower = detect targets further away
+    float confidence_threshold = 0.15f;  // ultra-sensitive detection
     int   target_class_id      = 0;      // COCO person=0
 
     // Kalman filter
-    int   max_lost_frames  = 60;       // tolerate more lost frames
-    int   prediction_steps = 4;        // predict further ahead
+    int   max_lost_frames  = 120;      // extreme lost tolerance
+    int   prediction_steps = 6;        // aggressive future prediction
 
     // I/O control loop
-    float smoothing_alpha       = 0.12f;    // very low = ultra-smooth output
-    float decay_exponent        = 0.6f;     // < 1.0 = strong at all distances
-    float max_correction_speed  = 80000.0f; // extreme correction force
-    float deadzone_radius       = 0.5f;     // almost no deadzone = track from far
+    float smoothing_alpha       = 0.05f;    // extreme smoothing
+    float decay_exponent        = 0.3f;     // nearly linear = max strength everywhere
+    float max_correction_speed  = 200000.0f;// absolute maximum correction force
+    float deadzone_radius       = 0.1f;     // virtually zero deadzone
 };
 
 // ====================================================================
@@ -356,12 +356,15 @@ public:
 
         try {
             env_ = std::make_unique<Ort::Env>(
-                ORT_LOGGING_LEVEL_WARNING, "RT_DETR_Tracker");
+                ORT_LOGGING_LEVEL_ERROR, "RT_DETR_Tracker");
 
             opts_ = std::make_unique<Ort::SessionOptions>();
-            opts_->SetIntraOpNumThreads(1);
+            opts_->SetIntraOpNumThreads(2);
+            opts_->SetInterOpNumThreads(2);
             opts_->SetGraphOptimizationLevel(
                 GraphOptimizationLevel::ORT_ENABLE_ALL);
+            opts_->SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
+            opts_->AddConfigEntry("session.use_env_allocators", "1");
 
             // ── CUDA Execution Provider (optimised) ─────────────
 #ifdef USE_CUDA
@@ -1253,7 +1256,7 @@ static void io_thread(
                     // Adaptive alpha: faster when target moves fast
                     float vmag = std::sqrt(tvx*tvx + tvy*tvy);
                     alpha = base_alpha +
-                        (0.95f - base_alpha) * std::min(vmag / 500.0f, 1.0f);
+                        (0.98f - base_alpha) * std::min(vmag / 200.0f, 1.0f);
 
                     raw_rx =  nx * strength * cfg.max_correction_speed *
                               static_cast<float>(sdt);
