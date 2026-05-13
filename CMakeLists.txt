@@ -303,52 +303,20 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE UNICODE _UNICODE)
 # ─────────────────────────────────────────────
 # Compiler-specific flags
 # ─────────────────────────────────────────────
+# IMPORTANT: Do NOT add optimization flags (/O2, /Od, -O3, etc.) here.
+# CMake and the IDE (CLion, Visual Studio) manage optimization and debug
+# flags automatically based on CMAKE_BUILD_TYPE / configuration.
+# Adding them manually causes conflicts (e.g. /RTC1 vs /O2 in MSVC Debug).
 if(MSVC)
-    # Aggressively strip /RTC1 and /Od from ALL default CMake flag variables.
-    # CLion and some CMake generators inject these for Debug, which conflicts
-    # with /O2. We remove them globally and only add optimization for Release.
-    foreach(_flag_var
-        CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
-        CMAKE_CXX_FLAGS_RELWITHDEBINFO CMAKE_CXX_FLAGS_MINSIZEREL
-        CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
-        CMAKE_C_FLAGS_RELWITHDEBINFO CMAKE_C_FLAGS_MINSIZEREL)
-        if(${_flag_var})
-            string(REPLACE "/RTC1" "" ${_flag_var} "${${_flag_var}}")
-            string(REPLACE "/Od"   "" ${_flag_var} "${${_flag_var}}")
-            string(REPLACE "/O2"   "" ${_flag_var} "${${_flag_var}}")
-            string(REPLACE "/O1"   "" ${_flag_var} "${${_flag_var}}")
-            # Clean up double spaces
-            string(REGEX REPLACE "  +" " " ${_flag_var} "${${_flag_var}}")
-            string(STRIP "${${_flag_var}}" ${_flag_var})
-        endif()
-    endforeach()
-
-    target_compile_options(${PROJECT_NAME} PRIVATE
-        /W4
-        $<$<CONFIG:Debug>:/Od /Zi>
-        $<$<CONFIG:Release>:/O2 /fp:fast /arch:AVX2 /DNDEBUG>
-        $<$<CONFIG:RelWithDebInfo>:/O2 /fp:fast /arch:AVX2 /Zi /DNDEBUG>
-        $<$<CONFIG:MinSizeRel>:/O1 /DNDEBUG>
-    )
+    target_compile_options(${PROJECT_NAME} PRIVATE /W4)
     target_link_options(${PROJECT_NAME} PRIVATE /SUBSYSTEM:CONSOLE)
 elseif(MINGW)
-    target_compile_options(${PROJECT_NAME} PRIVATE
-        -Wall -Wextra -mavx2
-        $<$<CONFIG:Release>:-O3>
-        $<$<CONFIG:RelWithDebInfo>:-O2 -g>
-        $<$<CONFIG:Debug>:-O0 -g>
-    )
-    # MinGW: enable large address awareness and static libgcc/libstdc++
+    target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra)
     target_link_options(${PROJECT_NAME} PRIVATE
         -static-libgcc -static-libstdc++
     )
 else()
-    target_compile_options(${PROJECT_NAME} PRIVATE
-        -Wall -Wextra
-        $<$<CONFIG:Release>:-O3>
-        $<$<CONFIG:RelWithDebInfo>:-O2 -g>
-        $<$<CONFIG:Debug>:-O0 -g>
-    )
+    target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra)
 endif()
 
 # ─────────────────────────────────────────────
