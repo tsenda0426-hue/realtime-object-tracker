@@ -175,15 +175,21 @@ set_target_properties(onnxruntime_imported PROPERTIES
 )
 
 # ─────────────────────────────────────────────
-# OpenCV
+# OpenCV - always use FetchContent unless user explicitly provides OPENCV_DIR
 # ─────────────────────────────────────────────
+set(_OPENCV_USE_FETCH TRUE)
+
 if(OPENCV_DIR AND EXISTS "${OPENCV_DIR}")
     set(OpenCV_DIR "${OPENCV_DIR}")
+    find_package(OpenCV QUIET COMPONENTS core imgproc)
+    if(OpenCV_FOUND)
+        set(_OPENCV_USE_FETCH FALSE)
+        message(STATUS "OpenCV found at user-specified path: ${OpenCV_VERSION}")
+    endif()
 endif()
-find_package(OpenCV QUIET COMPONENTS core imgproc)
 
-if(NOT OpenCV_FOUND)
-    message(STATUS "OpenCV not found locally – fetching via FetchContent …")
+if(_OPENCV_USE_FETCH)
+    message(STATUS "OpenCV: fetching via FetchContent (core + imgproc only)...")
     set(BUILD_LIST "core,imgproc" CACHE STRING "" FORCE)
     set(BUILD_opencv_apps       OFF CACHE BOOL "" FORCE)
     set(BUILD_opencv_calib3d    OFF CACHE BOOL "" FORCE)
@@ -226,20 +232,31 @@ if(NOT OpenCV_FOUND)
     )
     FetchContent_MakeAvailable(opencv)
 
-    # Manually set include paths for OpenCV built via FetchContent.
-    # The generated config headers (cvconfig.h, opencv_modules.hpp) live
-    # under ${opencv_BINARY_DIR}. Module headers are under modules/*/include.
+    # Include paths for FetchContent-built OpenCV.
     set(OpenCV_INCLUDE_DIRS
         "${opencv_SOURCE_DIR}/include"
         "${opencv_SOURCE_DIR}/modules/core/include"
         "${opencv_SOURCE_DIR}/modules/imgproc/include"
         "${opencv_BINARY_DIR}"
-        "${opencv_BINARY_DIR}/configHeaders"
     )
     set(OpenCV_LIBS opencv_core opencv_imgproc)
+
+    # Debug: verify paths exist
+    message(STATUS "OpenCV source dir: ${opencv_SOURCE_DIR}")
+    message(STATUS "OpenCV binary dir: ${opencv_BINARY_DIR}")
+    foreach(_dir ${OpenCV_INCLUDE_DIRS})
+        if(EXISTS "${_dir}")
+            message(STATUS "  [OK] ${_dir}")
+        else()
+            message(WARNING "  [MISSING] ${_dir}")
+        endif()
+    endforeach()
+    if(EXISTS "${opencv_SOURCE_DIR}/modules/core/include/opencv2/core.hpp")
+        message(STATUS "  [OK] opencv2/core.hpp found")
+    else()
+        message(WARNING "  [MISSING] opencv2/core.hpp NOT found!")
+    endif()
     message(STATUS "OpenCV fetched and configured (core + imgproc only)")
-else()
-    message(STATUS "OpenCV found: ${OpenCV_VERSION}")
 endif()
 
 # ─────────────────────────────────────────────
@@ -280,6 +297,10 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${VIGEMCLIENT_INCLUDE_DIR}
     ${OpenCV_INCLUDE_DIRS}
 )
+
+# Debug: show all include directories for the main target
+get_target_property(_ALL_INCS ${PROJECT_NAME} INCLUDE_DIRECTORIES)
+message(STATUS "Target include directories: ${_ALL_INCS}")
 
 # ─────────────────────────────────────────────
 # Link libraries
