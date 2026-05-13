@@ -338,6 +338,16 @@ endif()
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE UNICODE _UNICODE)
 
+# Prevent Windows.h from defining min/max macros that conflict with
+# std::min, std::max, std::clamp (causes C2589/C2059 errors).
+# WIN32_LEAN_AND_MEAN reduces Windows.h bloat and speeds compilation.
+if(WIN32)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE
+        NOMINMAX
+        WIN32_LEAN_AND_MEAN
+    )
+endif()
+
 # ─────────────────────────────────────────────
 # Compiler-specific flags
 # ─────────────────────────────────────────────
