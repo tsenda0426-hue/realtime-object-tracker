@@ -17,12 +17,21 @@ set(ONNXRUNTIME_ROOT "" CACHE PATH "Root directory of ONNX Runtime SDK")
 set(VIGEMCLIENT_ROOT "" CACHE PATH "Root directory of ViGEmClient SDK")
 set(OPENCV_DIR       "" CACHE PATH "OpenCV CMake config directory")
 
+# Detect compiler
+if(MINGW)
+    message(STATUS "Compiler: MinGW (GCC/G++)")
+elseif(MSVC)
+    message(STATUS "Compiler: MSVC")
+endif()
+
 # ─────────────────────────────────────────────
-# FetchContent: automatically download headers / SDKs when not provided
+# FetchContent
 # ─────────────────────────────────────────────
 include(FetchContent)
 
-# --- ViGEmClient (header-only client + import lib) ---
+# ─────────────────────────────────────────────
+# ViGEmClient
+# ─────────────────────────────────────────────
 if(NOT VIGEMCLIENT_ROOT OR NOT EXISTS "${VIGEMCLIENT_ROOT}")
     message(STATUS "ViGEmClient not specified – fetching from GitHub …")
     FetchContent_Declare(
@@ -47,23 +56,16 @@ endif()
 set(ONNXRUNTIME_VERSION "1.22.0" CACHE STRING "ONNX Runtime version to download")
 
 if(ONNXRUNTIME_ROOT AND EXISTS "${ONNXRUNTIME_ROOT}")
-    # User provided a local SDK path
-    set(ONNXRUNTIME_INCLUDE_DIR "${ONNXRUNTIME_ROOT}/include")
-    find_library(ONNXRUNTIME_LIB
-        NAMES onnxruntime
-        PATHS "${ONNXRUNTIME_ROOT}/lib"
-    )
     message(STATUS "ONNX Runtime: using local SDK at ${ONNXRUNTIME_ROOT}")
 else()
     # Auto-download pre-built ONNX Runtime GPU SDK
     message(STATUS "ONNX Runtime not specified – downloading v${ONNXRUNTIME_VERSION} GPU SDK …")
     if(WIN32)
         set(_ORT_ARCHIVE "onnxruntime-win-x64-gpu-${ONNXRUNTIME_VERSION}.zip")
-        set(_ORT_URL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/${_ORT_ARCHIVE}")
     else()
         set(_ORT_ARCHIVE "onnxruntime-linux-x64-gpu-${ONNXRUNTIME_VERSION}.tgz")
-        set(_ORT_URL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/${_ORT_ARCHIVE}")
     endif()
+    set(_ORT_URL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/${_ORT_ARCHIVE}")
 
     FetchContent_Declare(
         onnxruntime_sdk
@@ -71,16 +73,98 @@ else()
         DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     )
     FetchContent_MakeAvailable(onnxruntime_sdk)
-
     set(ONNXRUNTIME_ROOT "${onnxruntime_sdk_SOURCE_DIR}")
-    set(ONNXRUNTIME_INCLUDE_DIR "${ONNXRUNTIME_ROOT}/include")
-    find_library(ONNXRUNTIME_LIB
+    message(STATUS "ONNX Runtime SDK downloaded to: ${ONNXRUNTIME_ROOT}")
+endif()
+
+set(ONNXRUNTIME_INCLUDE_DIR "${ONNXRUNTIME_ROOT}/include")
+
+# Create an imported target for ONNX Runtime that works with both MSVC and MinGW.
+# The pre-built SDK ships onnxruntime.dll + onnxruntime.lib (MSVC import lib).
+# MinGW can link against a .dll directly via IMPORTED_IMPLIB on the .dll file,
+# or we generate a MinGW-compatible import library (.dll.a) with dlltool.
+add_library(onnxruntime_imported SHARED IMPORTED)
+
+if(WIN32)
+    # Locate the DLL and the MSVC import lib
+    file(GLOB _ORT_DLL "${ONNXRUNTIME_ROOT}/lib/onnxruntime*.dll")
+    file(GLOB _ORT_LIB "${ONNXRUNTIME_ROOT}/lib/onnxruntime*.lib")
+
+    if(_ORT_DLL)
+        list(GET _ORT_DLL 0 _ORT_DLL_PATH)
+        set_target_properties(onnxruntime_imported PROPERTIES
+            IMPORTED_LOCATION "${_ORT_DLL_PATH}"
+        )
+    endif()
+
+    if(MINGW)
+        # MinGW: generate a .dll.a import library from the DLL using gendef+dlltool
+        if(_ORT_DLL)
+            set(_ORT_DEF "${CMAKE_CURRENT_BINARY_DIR}/onnxruntime.def")
+            set(_ORT_DLLA "${CMAKE_CURRENT_BINARY_DIR}/libonnxruntime.dll.a")
+
+            if(NOT EXISTS "${_ORT_DLLA}")
+                # Try gendef first (from mingw-w64-tools), fall back to creating minimal def
+                find_program(GENDEF_EXE gendef)
+                find_program(DLLTOOL_EXE dlltool)
+
+                if(GENDEF_EXE AND DLLTOOL_EXE)
+                    execute_process(
+                        COMMAND "${GENDEF_EXE}" "-" "${_ORT_DLL_PATH}"
+                        OUTPUT_FILE "${_ORT_DEF}"
+                        RESULT_VARIABLE _gendef_result
+                    )
+                    if(_gendef_result EQUAL 0)
+                        execute_process(
+                            COMMAND "${DLLTOOL_EXE}" -d "${_ORT_DEF}"
+                                    -l "${_ORT_DLLA}" -D "onnxruntime.dll"
+                            RESULT_VARIABLE _dlltool_result
+                        )
+                        if(_dlltool_result EQUAL 0)
+                            message(STATUS "Generated MinGW import lib: ${_ORT_DLLA}")
+                        endif()
+                    endif()
+                endif()
+            endif()
+
+            if(EXISTS "${_ORT_DLLA}")
+                set_target_properties(onnxruntime_imported PROPERTIES
+                    IMPORTED_IMPLIB "${_ORT_DLLA}"
+                )
+            else()
+                # Fallback: MinGW can link directly against a DLL
+                message(STATUS "MinGW: linking directly against onnxruntime.dll")
+                set_target_properties(onnxruntime_imported PROPERTIES
+                    IMPORTED_IMPLIB "${_ORT_DLL_PATH}"
+                )
+            endif()
+        endif()
+    else()
+        # MSVC: use the .lib import library
+        if(_ORT_LIB)
+            list(GET _ORT_LIB 0 _ORT_LIB_PATH)
+            set_target_properties(onnxruntime_imported PROPERTIES
+                IMPORTED_IMPLIB "${_ORT_LIB_PATH}"
+            )
+        endif()
+    endif()
+else()
+    # Linux / non-Windows
+    find_library(_ORT_SO
         NAMES onnxruntime
         PATHS "${ONNXRUNTIME_ROOT}/lib"
         NO_DEFAULT_PATH
     )
-    message(STATUS "ONNX Runtime SDK downloaded to: ${ONNXRUNTIME_ROOT}")
+    if(_ORT_SO)
+        set_target_properties(onnxruntime_imported PROPERTIES
+            IMPORTED_LOCATION "${_ORT_SO}"
+        )
+    endif()
 endif()
+
+set_target_properties(onnxruntime_imported PROPERTIES
+    INTERFACE_INCLUDE_DIRECTORIES "${ONNXRUNTIME_INCLUDE_DIR}"
+)
 
 # ─────────────────────────────────────────────
 # OpenCV
@@ -92,40 +176,39 @@ find_package(OpenCV QUIET COMPONENTS core imgproc)
 
 if(NOT OpenCV_FOUND)
     message(STATUS "OpenCV not found locally – fetching via FetchContent …")
-    # Disable unnecessary OpenCV modules to speed up the build
     set(BUILD_LIST "core,imgproc" CACHE STRING "" FORCE)
-    set(BUILD_opencv_apps     OFF CACHE BOOL "" FORCE)
-    set(BUILD_opencv_calib3d  OFF CACHE BOOL "" FORCE)
-    set(BUILD_opencv_dnn      OFF CACHE BOOL "" FORCE)
+    set(BUILD_opencv_apps       OFF CACHE BOOL "" FORCE)
+    set(BUILD_opencv_calib3d    OFF CACHE BOOL "" FORCE)
+    set(BUILD_opencv_dnn        OFF CACHE BOOL "" FORCE)
     set(BUILD_opencv_features2d OFF CACHE BOOL "" FORCE)
-    set(BUILD_opencv_flann    OFF CACHE BOOL "" FORCE)
-    set(BUILD_opencv_gapi     OFF CACHE BOOL "" FORCE)
-    set(BUILD_opencv_highgui  OFF CACHE BOOL "" FORCE)
-    set(BUILD_opencv_java     OFF CACHE BOOL "" FORCE)
-    set(BUILD_opencv_js       OFF CACHE BOOL "" FORCE)
-    set(BUILD_opencv_ml       OFF CACHE BOOL "" FORCE)
-    set(BUILD_opencv_objdetect OFF CACHE BOOL "" FORCE)
-    set(BUILD_opencv_photo    OFF CACHE BOOL "" FORCE)
-    set(BUILD_opencv_python3  OFF CACHE BOOL "" FORCE)
-    set(BUILD_opencv_stitching OFF CACHE BOOL "" FORCE)
-    set(BUILD_opencv_ts       OFF CACHE BOOL "" FORCE)
-    set(BUILD_opencv_video    OFF CACHE BOOL "" FORCE)
-    set(BUILD_opencv_videoio  OFF CACHE BOOL "" FORCE)
-    set(BUILD_TESTS           OFF CACHE BOOL "" FORCE)
-    set(BUILD_PERF_TESTS      OFF CACHE BOOL "" FORCE)
-    set(BUILD_EXAMPLES        OFF CACHE BOOL "" FORCE)
-    set(BUILD_DOCS            OFF CACHE BOOL "" FORCE)
-    set(BUILD_WITH_STATIC_CRT OFF CACHE BOOL "" FORCE)
-    set(BUILD_SHARED_LIBS     OFF CACHE BOOL "" FORCE)
+    set(BUILD_opencv_flann      OFF CACHE BOOL "" FORCE)
+    set(BUILD_opencv_gapi       OFF CACHE BOOL "" FORCE)
+    set(BUILD_opencv_highgui    OFF CACHE BOOL "" FORCE)
+    set(BUILD_opencv_java       OFF CACHE BOOL "" FORCE)
+    set(BUILD_opencv_js         OFF CACHE BOOL "" FORCE)
+    set(BUILD_opencv_ml         OFF CACHE BOOL "" FORCE)
+    set(BUILD_opencv_objdetect  OFF CACHE BOOL "" FORCE)
+    set(BUILD_opencv_photo      OFF CACHE BOOL "" FORCE)
+    set(BUILD_opencv_python3    OFF CACHE BOOL "" FORCE)
+    set(BUILD_opencv_stitching  OFF CACHE BOOL "" FORCE)
+    set(BUILD_opencv_ts         OFF CACHE BOOL "" FORCE)
+    set(BUILD_opencv_video      OFF CACHE BOOL "" FORCE)
+    set(BUILD_opencv_videoio    OFF CACHE BOOL "" FORCE)
+    set(BUILD_TESTS             OFF CACHE BOOL "" FORCE)
+    set(BUILD_PERF_TESTS        OFF CACHE BOOL "" FORCE)
+    set(BUILD_EXAMPLES          OFF CACHE BOOL "" FORCE)
+    set(BUILD_DOCS              OFF CACHE BOOL "" FORCE)
+    set(BUILD_WITH_STATIC_CRT   OFF CACHE BOOL "" FORCE)
+    set(BUILD_SHARED_LIBS       OFF CACHE BOOL "" FORCE)
     set(OPENCV_GENERATE_PKGCONFIG OFF CACHE BOOL "" FORCE)
-    set(WITH_FFMPEG           OFF CACHE BOOL "" FORCE)
-    set(WITH_GSTREAMER        OFF CACHE BOOL "" FORCE)
-    set(WITH_GTK              OFF CACHE BOOL "" FORCE)
-    set(WITH_VTK              OFF CACHE BOOL "" FORCE)
-    set(WITH_OPENEXR          OFF CACHE BOOL "" FORCE)
-    set(WITH_JASPER           OFF CACHE BOOL "" FORCE)
-    set(WITH_PROTOBUF         OFF CACHE BOOL "" FORCE)
-    set(WITH_QUIRC            OFF CACHE BOOL "" FORCE)
+    set(WITH_FFMPEG             OFF CACHE BOOL "" FORCE)
+    set(WITH_GSTREAMER          OFF CACHE BOOL "" FORCE)
+    set(WITH_GTK                OFF CACHE BOOL "" FORCE)
+    set(WITH_VTK                OFF CACHE BOOL "" FORCE)
+    set(WITH_OPENEXR            OFF CACHE BOOL "" FORCE)
+    set(WITH_JASPER             OFF CACHE BOOL "" FORCE)
+    set(WITH_PROTOBUF           OFF CACHE BOOL "" FORCE)
+    set(WITH_QUIRC              OFF CACHE BOOL "" FORCE)
 
     FetchContent_Declare(
         opencv
@@ -150,7 +233,8 @@ endif()
 # ─────────────────────────────────────────────
 # Windows SDK (DXGI, D3D11, XInput)
 # ─────────────────────────────────────────────
-# These ship with the Windows SDK / MSVC; no find_package needed.
+# These ship with the Windows SDK / MSVC.
+# For MinGW, the Windows API headers and libs are provided by mingw-w64.
 
 # ─────────────────────────────────────────────
 # CUDA (optional – only for ONNX Runtime EP linkage hints)
@@ -189,18 +273,20 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 # Link libraries
 # ─────────────────────────────────────────────
 target_link_libraries(${PROJECT_NAME} PRIVATE
-    # ONNX Runtime
-    ${ONNXRUNTIME_LIB}
-    # ViGEmClient
+    onnxruntime_imported
     ${VIGEMCLIENT_LIB}
-    # OpenCV
     ${OpenCV_LIBS}
-    # Windows SDK libs (only relevant on MSVC / Windows)
-    $<$<PLATFORM_ID:Windows>:d3d11>
-    $<$<PLATFORM_ID:Windows>:dxgi>
-    $<$<PLATFORM_ID:Windows>:xinput>
-    $<$<PLATFORM_ID:Windows>:setupapi>
 )
+
+# Windows system libraries (works for both MSVC and MinGW)
+if(WIN32)
+    target_link_libraries(${PROJECT_NAME} PRIVATE
+        d3d11
+        dxgi
+        xinput
+        setupapi
+    )
+endif()
 
 # ─────────────────────────────────────────────
 # Compile definitions
@@ -212,24 +298,33 @@ if(USE_TENSORRT)
     target_compile_definitions(${PROJECT_NAME} PRIVATE USE_TENSORRT=1)
 endif()
 
-# Unicode support
 target_compile_definitions(${PROJECT_NAME} PRIVATE UNICODE _UNICODE)
 
-# MSVC-specific flags
-# NOTE: /O2 and /RTC1 conflict; use generator expressions so optimization
-#       flags only apply in Release and RelWithDebInfo configurations.
+# ─────────────────────────────────────────────
+# Compiler-specific flags
+# ─────────────────────────────────────────────
 if(MSVC)
     target_compile_options(${PROJECT_NAME} PRIVATE
         /W4 /fp:fast /arch:AVX2
         $<$<CONFIG:Release>:/O2 /DNDEBUG>
         $<$<CONFIG:RelWithDebInfo>:/O2 /DNDEBUG>
     )
-    # Remove default /RTC1 from Debug flags to avoid conflicts if user
-    # switches to Release later in the same CMake cache.
     string(REPLACE "/RTC1" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
     target_link_options(${PROJECT_NAME} PRIVATE /SUBSYSTEM:CONSOLE)
+elseif(MINGW)
+    target_compile_options(${PROJECT_NAME} PRIVATE
+        -Wall -Wextra -mavx2
+        $<$<CONFIG:Release>:-O3>
+        $<$<CONFIG:RelWithDebInfo>:-O2 -g>
+        $<$<CONFIG:Debug>:-O0 -g>
+    )
+    # MinGW: enable large address awareness and static libgcc/libstdc++
+    target_link_options(${PROJECT_NAME} PRIVATE
+        -static-libgcc -static-libstdc++
+    )
 else()
-    target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -mavx2
+    target_compile_options(${PROJECT_NAME} PRIVATE
+        -Wall -Wextra
         $<$<CONFIG:Release>:-O3>
         $<$<CONFIG:RelWithDebInfo>:-O2 -g>
         $<$<CONFIG:Debug>:-O0 -g>
@@ -252,6 +347,8 @@ endif()
 
 message(STATUS "──────────────────────────────────────")
 message(STATUS "  RealtimeObjectTracker configuration")
+message(STATUS "  Compiler     : ${CMAKE_CXX_COMPILER_ID}")
+message(STATUS "  Generator    : ${CMAKE_GENERATOR}")
 message(STATUS "  CUDA EP      : ${USE_CUDA}")
 message(STATUS "  TensorRT EP  : ${USE_TENSORRT}")
 message(STATUS "  ONNX Runtime : ${ONNXRUNTIME_ROOT}")

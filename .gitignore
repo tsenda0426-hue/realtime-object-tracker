@@ -1,7 +1,9 @@
 # Build output
 build/
+build-*/
 out/
 cmake-build-*/
+CMakeUserPresets.json
 
 # IDE
 .vs/

@@ -1,0 +1,88 @@
+{
+    "version": 3,
+    "configurePresets": [
+        {
+            "name": "mingw-debug",
+            "displayName": "MinGW Debug",
+            "description": "MinGW Makefiles – Debug build",
+            "generator": "MinGW Makefiles",
+            "binaryDir": "${sourceDir}/build-mingw-debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_CXX_STANDARD": "17",
+                "USE_CUDA": "ON"
+            }
+        },
+        {
+            "name": "mingw-release",
+            "displayName": "MinGW Release",
+            "description": "MinGW Makefiles – Release build",
+            "generator": "MinGW Makefiles",
+            "binaryDir": "${sourceDir}/build-mingw-release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_CXX_STANDARD": "17",
+                "USE_CUDA": "ON"
+            }
+        },
+        {
+            "name": "ninja-debug",
+            "displayName": "Ninja Debug (MinGW)",
+            "description": "Ninja with MinGW toolchain – Debug",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build-ninja-debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_CXX_STANDARD": "17",
+                "USE_CUDA": "ON"
+            }
+        },
+        {
+            "name": "ninja-release",
+            "displayName": "Ninja Release (MinGW)",
+            "description": "Ninja with MinGW toolchain – Release",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build-ninja-release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_CXX_STANDARD": "17",
+                "USE_CUDA": "ON"
+            }
+        },
+        {
+            "name": "msvc-x64",
+            "displayName": "Visual Studio 2022 x64",
+            "description": "Visual Studio 17 2022 – x64",
+            "generator": "Visual Studio 17 2022",
+            "architecture": "x64",
+            "binaryDir": "${sourceDir}/build-msvc",
+            "cacheVariables": {
+                "CMAKE_CXX_STANDARD": "17",
+                "USE_CUDA": "ON"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "mingw-debug-build",
+            "configurePreset": "mingw-debug"
+        },
+        {
+            "name": "mingw-release-build",
+            "configurePreset": "mingw-release"
+        },
+        {
+            "name": "ninja-debug-build",
+            "configurePreset": "ninja-debug"
+        },
+        {
+            "name": "ninja-release-build",
+            "configurePreset": "ninja-release"
+        },
+        {
+            "name": "msvc-release-build",
+            "configurePreset": "msvc-x64",
+            "configuration": "Release"
+        }
+    ]
+}
