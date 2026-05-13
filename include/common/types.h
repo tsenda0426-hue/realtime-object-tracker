@@ -59,14 +59,14 @@ struct SystemConfig {
     int   target_class_id        = 0;
 
     // tracking
-    int   max_lost_frames        = 15;
-    int   prediction_steps       = 3;
+    int   max_lost_frames        = 20;      // tolerate more lost frames
+    int   prediction_steps       = 2;       // fewer steps = tighter to current
 
-    // input control
-    float smoothing_alpha        = 0.35f;   // EMA alpha
-    float decay_exponent         = 2.0f;    // non-linear decay power
-    float max_correction_speed   = 20000.0f; // max stick deflection per sec
-    float deadzone_radius        = 5.0f;    // pixels - below this, no correction
+    // input control (tuned for sub-ms response)
+    float smoothing_alpha        = 0.6f;    // base EMA alpha (adaptive range: 0.6-0.95)
+    float decay_exponent         = 1.5f;    // gentler curve for smoother convergence
+    float max_correction_speed   = 25000.0f; // aggressive stick deflection rate
+    float deadzone_radius        = 3.0f;    // tighter deadzone for precision
 };
 
 } // namespace tracker

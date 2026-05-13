@@ -351,34 +351,62 @@ endif()
 # ─────────────────────────────────────────────
 # Compiler-specific flags
 # ─────────────────────────────────────────────
-# IMPORTANT: Do NOT add optimization flags (/O2, /Od, -O3, etc.) here.
-# CMake and the IDE (CLion, Visual Studio) manage optimization and debug
-# flags automatically based on CMAKE_BUILD_TYPE / configuration.
-# Adding them manually causes conflicts (e.g. /RTC1 vs /O2 in MSVC Debug).
+# Release optimization flags use generator expressions so they NEVER
+# apply to Debug builds (avoids /RTC1 vs /O2 conflict).
 if(MSVC)
-    target_compile_options(${PROJECT_NAME} PRIVATE /W4)
-    target_link_options(${PROJECT_NAME} PRIVATE /SUBSYSTEM:CONSOLE)
+    target_compile_options(${PROJECT_NAME} PRIVATE
+        /W4
+        $<$<CONFIG:Release>:/O2 /Oi /GL /fp:fast /arch:AVX2>
+        $<$<CONFIG:RelWithDebInfo>:/O2 /Oi /fp:fast /arch:AVX2>
+    )
+    target_link_options(${PROJECT_NAME} PRIVATE
+        /SUBSYSTEM:CONSOLE
+        $<$<CONFIG:Release>:/LTCG /OPT:REF /OPT:ICF>
+    )
 elseif(MINGW)
-    target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra)
+    target_compile_options(${PROJECT_NAME} PRIVATE
+        -Wall -Wextra
+        $<$<CONFIG:Release>:-O3 -march=native -ffast-math -flto>
+    )
     target_link_options(${PROJECT_NAME} PRIVATE
         -static-libgcc -static-libstdc++
+        $<$<CONFIG:Release>:-flto>
     )
 else()
-    target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra)
+    target_compile_options(${PROJECT_NAME} PRIVATE
+        -Wall -Wextra
+        $<$<CONFIG:Release>:-O3 -march=native -ffast-math -flto>
+    )
 endif()
 
 # ─────────────────────────────────────────────
-# Post-build: copy ONNX Runtime DLLs next to executable
+# Post-build: copy ALL required DLLs next to executable
 # ─────────────────────────────────────────────
-if(WIN32 AND ONNXRUNTIME_ROOT)
-    file(GLOB ORT_DLLS "${ONNXRUNTIME_ROOT}/lib/*.dll")
-    foreach(dll ${ORT_DLLS})
-        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${dll}"
-                "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
-        )
-    endforeach()
+if(WIN32)
+    # ONNX Runtime DLLs
+    if(ONNXRUNTIME_ROOT)
+        file(GLOB ORT_DLLS "${ONNXRUNTIME_ROOT}/lib/*.dll")
+        foreach(dll ${ORT_DLLS})
+            add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${dll}"
+                    "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
+            )
+        endforeach()
+    endif()
+
+    # OpenCV DLLs (when built as shared libs via FetchContent)
+    if(_OPENCV_USE_FETCH)
+        foreach(_cv_target ${OpenCV_LIBS})
+            if(TARGET ${_cv_target})
+                add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "$<TARGET_FILE:${_cv_target}>"
+                        "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
+                )
+            endif()
+        endforeach()
+    endif()
 endif()
 
 message(STATUS "──────────────────────────────────────")

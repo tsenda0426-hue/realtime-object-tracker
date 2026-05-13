@@ -10,6 +10,7 @@
 #include <numeric>
 #include <cmath>
 #include <cstdio>
+#include <stdexcept>
 
 namespace tracker {
 
@@ -93,6 +94,12 @@ bool OnnxDetector::initialize(const char* model_path, int input_size,
     } catch (const Ort::Exception& e) {
         std::fprintf(stderr, "[OnnxDetector] ONNX Runtime error: %s\n", e.what());
         return false;
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[OnnxDetector] Initialization error: %s\n", e.what());
+        return false;
+    } catch (...) {
+        std::fprintf(stderr, "[OnnxDetector] Unknown initialization error\n");
+        return false;
     }
 }
 
@@ -142,31 +149,39 @@ std::vector<Detection> OnnxDetector::detect(const uint8_t* bgra_data,
                                              int img_stride) {
     if (!session_) return {};
 
-    // Pre-process
-    std::vector<float> blob;
-    preprocess(bgra_data, img_width, img_height, img_stride, blob);
+    try {
+        // Pre-process
+        std::vector<float> blob;
+        preprocess(bgra_data, img_width, img_height, img_stride, blob);
 
-    // Create input tensor
-    std::array<int64_t, 4> input_shape = {1, 3, input_size_, input_size_};
-    Ort::MemoryInfo mem_info = Ort::MemoryInfo::CreateCpu(
-        OrtArenaAllocator, OrtMemTypeDefault);
+        // Create input tensor
+        std::array<int64_t, 4> input_shape = {1, 3, input_size_, input_size_};
+        Ort::MemoryInfo mem_info = Ort::MemoryInfo::CreateCpu(
+            OrtArenaAllocator, OrtMemTypeDefault);
 
-    Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
-        mem_info, blob.data(), blob.size(),
-        input_shape.data(), input_shape.size());
+        Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
+            mem_info, blob.data(), blob.size(),
+            input_shape.data(), input_shape.size());
 
-    // Run inference
-    auto output_tensors = session_->Run(
-        Ort::RunOptions{nullptr},
-        input_names_.data(), &input_tensor, 1,
-        output_names_.data(), output_names_.size());
+        // Run inference
+        auto output_tensors = session_->Run(
+            Ort::RunOptions{nullptr},
+            input_names_.data(), &input_tensor, 1,
+            output_names_.data(), output_names_.size());
 
-    // Extract output
-    const float* output_data = output_tensors[0].GetTensorData<float>();
-    auto shape_info = output_tensors[0].GetTensorTypeAndShapeInfo();
-    auto output_shape = shape_info.GetShape();
+        // Extract output
+        const float* output_data = output_tensors[0].GetTensorData<float>();
+        auto shape_info = output_tensors[0].GetTensorTypeAndShapeInfo();
+        auto output_shape = shape_info.GetShape();
 
-    return postprocess(output_data, output_shape, img_width, img_height);
+        return postprocess(output_data, output_shape, img_width, img_height);
+    } catch (const Ort::Exception& e) {
+        std::fprintf(stderr, "[OnnxDetector] Inference error: %s\n", e.what());
+        return {};
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[OnnxDetector] Detection error: %s\n", e.what());
+        return {};
+    }
 }
 
 std::vector<Detection> OnnxDetector::postprocess(
