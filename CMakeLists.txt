@@ -1,47 +1,48 @@
 cmake_minimum_required(VERSION 3.20)
-project(RealtimeObjectTracker LANGUAGES CXX)
+project(RT_DETR_Tracker LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+# ─────────────────────────────────────────────────────────────────────
+# C++20
+# ─────────────────────────────────────────────────────────────────────
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────
 # Build options
-# ─────────────────────────────────────────────
-option(USE_CUDA       "Enable CUDA Execution Provider for ONNX Runtime" ON)
-option(USE_TENSORRT   "Enable TensorRT Execution Provider for ONNX Runtime" OFF)
+# ─────────────────────────────────────────────────────────────────────
+option(USE_CUDA     "Enable CUDA Execution Provider for ONNX Runtime" ON)
+option(USE_TENSORRT "Enable TensorRT Execution Provider"              OFF)
 
-# ─────────────────────────────────────────────
-# External dependency paths (user-configurable)
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────
+# User-configurable SDK paths (override FetchContent if provided)
+# ─────────────────────────────────────────────────────────────────────
 set(ONNXRUNTIME_ROOT "" CACHE PATH "Root directory of ONNX Runtime SDK")
 set(VIGEMCLIENT_ROOT "" CACHE PATH "Root directory of ViGEmClient SDK")
 set(OPENCV_DIR       "" CACHE PATH "OpenCV CMake config directory")
 
-# Detect compiler and set global encoding flags
-if(MINGW)
-    message(STATUS "Compiler: MinGW (GCC/G++)")
-elseif(MSVC)
+# ─────────────────────────────────────────────────────────────────────
+# Compiler encoding (MSVC: force UTF-8 for JP sources)
+# ─────────────────────────────────────────────────────────────────────
+if(MSVC)
     message(STATUS "Compiler: MSVC")
-    # Force UTF-8 source and execution character sets globally.
-    # Without this, Japanese Windows (code page 932) misinterprets UTF-8
-    # source files, causing cascading C2530/C2143/C4430 compile errors.
-    # Use CMAKE_*_FLAGS to ensure these flags appear in every compilation
-    # command, including FetchContent-built dependencies like OpenCV.
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /utf-8 /wd4819")
     set(CMAKE_C_FLAGS   "${CMAKE_C_FLAGS}   /utf-8 /wd4819")
     add_compile_options(/utf-8 /wd4819)
+elseif(MINGW)
+    message(STATUS "Compiler: MinGW (GCC/G++)")
 endif()
 
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────
 # FetchContent
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────
 include(FetchContent)
 
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────
 # ViGEmClient
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────
 if(NOT VIGEMCLIENT_ROOT OR NOT EXISTS "${VIGEMCLIENT_ROOT}")
-    message(STATUS "ViGEmClient not specified – fetching from GitHub …")
+    message(STATUS "ViGEmClient: fetching from GitHub ...")
     FetchContent_Declare(
         vigemclient
         GIT_REPOSITORY https://github.com/ViGEm/ViGEmClient.git
@@ -58,22 +59,22 @@ else()
     )
 endif()
 
-# ─────────────────────────────────────────────
-# ONNX Runtime
-# ─────────────────────────────────────────────
-set(ONNXRUNTIME_VERSION "1.22.0" CACHE STRING "ONNX Runtime version to download")
+# ─────────────────────────────────────────────────────────────────────
+# ONNX Runtime (pre-built GPU SDK via FetchContent)
+# ─────────────────────────────────────────────────────────────────────
+set(ONNXRUNTIME_VERSION "1.22.0" CACHE STRING "ONNX Runtime version")
 
 if(ONNXRUNTIME_ROOT AND EXISTS "${ONNXRUNTIME_ROOT}")
     message(STATUS "ONNX Runtime: using local SDK at ${ONNXRUNTIME_ROOT}")
 else()
-    # Auto-download pre-built ONNX Runtime GPU SDK
-    message(STATUS "ONNX Runtime not specified – downloading v${ONNXRUNTIME_VERSION} GPU SDK …")
+    message(STATUS "ONNX Runtime: downloading v${ONNXRUNTIME_VERSION} GPU SDK ...")
     if(WIN32)
         set(_ORT_ARCHIVE "onnxruntime-win-x64-gpu-${ONNXRUNTIME_VERSION}.zip")
     else()
         set(_ORT_ARCHIVE "onnxruntime-linux-x64-gpu-${ONNXRUNTIME_VERSION}.tgz")
     endif()
-    set(_ORT_URL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/${_ORT_ARCHIVE}")
+    set(_ORT_URL
+        "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/${_ORT_ARCHIVE}")
 
     FetchContent_Declare(
         onnxruntime_sdk
@@ -82,19 +83,15 @@ else()
     )
     FetchContent_MakeAvailable(onnxruntime_sdk)
     set(ONNXRUNTIME_ROOT "${onnxruntime_sdk_SOURCE_DIR}")
-    message(STATUS "ONNX Runtime SDK downloaded to: ${ONNXRUNTIME_ROOT}")
+    message(STATUS "ONNX Runtime SDK at: ${ONNXRUNTIME_ROOT}")
 endif()
 
 set(ONNXRUNTIME_INCLUDE_DIR "${ONNXRUNTIME_ROOT}/include")
 
-# Create an imported target for ONNX Runtime that works with both MSVC and MinGW.
-# The pre-built SDK ships onnxruntime.dll + onnxruntime.lib (MSVC import lib).
-# MinGW can link against a .dll directly via IMPORTED_IMPLIB on the .dll file,
-# or we generate a MinGW-compatible import library (.dll.a) with dlltool.
+# Imported target
 add_library(onnxruntime_imported SHARED IMPORTED)
 
 if(WIN32)
-    # Locate the DLL and the MSVC import lib
     file(GLOB _ORT_DLL "${ONNXRUNTIME_ROOT}/lib/onnxruntime*.dll")
     file(GLOB _ORT_LIB "${ONNXRUNTIME_ROOT}/lib/onnxruntime*.lib")
 
@@ -106,16 +103,13 @@ if(WIN32)
     endif()
 
     if(MINGW)
-        # MinGW: generate a .dll.a import library from the DLL using gendef+dlltool
         if(_ORT_DLL)
-            set(_ORT_DEF "${CMAKE_CURRENT_BINARY_DIR}/onnxruntime.def")
+            set(_ORT_DEF  "${CMAKE_CURRENT_BINARY_DIR}/onnxruntime.def")
             set(_ORT_DLLA "${CMAKE_CURRENT_BINARY_DIR}/libonnxruntime.dll.a")
 
             if(NOT EXISTS "${_ORT_DLLA}")
-                # Try gendef first (from mingw-w64-tools), fall back to creating minimal def
-                find_program(GENDEF_EXE gendef)
+                find_program(GENDEF_EXE  gendef)
                 find_program(DLLTOOL_EXE dlltool)
-
                 if(GENDEF_EXE AND DLLTOOL_EXE)
                     execute_process(
                         COMMAND "${GENDEF_EXE}" "-" "${_ORT_DLL_PATH}"
@@ -140,7 +134,6 @@ if(WIN32)
                     IMPORTED_IMPLIB "${_ORT_DLLA}"
                 )
             else()
-                # Fallback: MinGW can link directly against a DLL
                 message(STATUS "MinGW: linking directly against onnxruntime.dll")
                 set_target_properties(onnxruntime_imported PROPERTIES
                     IMPORTED_IMPLIB "${_ORT_DLL_PATH}"
@@ -148,7 +141,6 @@ if(WIN32)
             endif()
         endif()
     else()
-        # MSVC: use the .lib import library
         if(_ORT_LIB)
             list(GET _ORT_LIB 0 _ORT_LIB_PATH)
             set_target_properties(onnxruntime_imported PROPERTIES
@@ -157,7 +149,6 @@ if(WIN32)
         endif()
     endif()
 else()
-    # Linux / non-Windows
     find_library(_ORT_SO
         NAMES onnxruntime
         PATHS "${ONNXRUNTIME_ROOT}/lib"
@@ -174,9 +165,9 @@ set_target_properties(onnxruntime_imported PROPERTIES
     INTERFACE_INCLUDE_DIRECTORIES "${ONNXRUNTIME_INCLUDE_DIR}"
 )
 
-# ─────────────────────────────────────────────
-# OpenCV - always use FetchContent unless user explicitly provides OPENCV_DIR
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────
+# OpenCV (core + imgproc only, via FetchContent)
+# ─────────────────────────────────────────────────────────────────────
 set(_OPENCV_USE_FETCH TRUE)
 
 if(OPENCV_DIR AND EXISTS "${OPENCV_DIR}")
@@ -189,8 +180,8 @@ if(OPENCV_DIR AND EXISTS "${OPENCV_DIR}")
 endif()
 
 if(_OPENCV_USE_FETCH)
-    message(STATUS "OpenCV: fetching via FetchContent (core + imgproc only)...")
-    set(BUILD_LIST "core,imgproc" CACHE STRING "" FORCE)
+    message(STATUS "OpenCV: fetching via FetchContent (core + imgproc only) ...")
+    set(BUILD_LIST              "core,imgproc" CACHE STRING "" FORCE)
     set(BUILD_opencv_apps       OFF CACHE BOOL "" FORCE)
     set(BUILD_opencv_calib3d    OFF CACHE BOOL "" FORCE)
     set(BUILD_opencv_dnn        OFF CACHE BOOL "" FORCE)
@@ -232,11 +223,6 @@ if(_OPENCV_USE_FETCH)
     )
     FetchContent_MakeAvailable(opencv)
 
-    # Include paths for FetchContent-built OpenCV.
-    # IMPORTANT: OpenCV generates opencv2/opencv_modules.hpp and cvconfig.h
-    # in CMAKE_BINARY_DIR (top-level build dir), NOT in opencv_BINARY_DIR.
-    # This is because OpenCV's CMakeLists.txt uses CMAKE_BINARY_DIR for
-    # OPENCV_CONFIG_FILE_INCLUDE_DIR.
     set(OpenCV_INCLUDE_DIRS
         "${opencv_SOURCE_DIR}/include"
         "${opencv_SOURCE_DIR}/modules/core/include"
@@ -245,78 +231,44 @@ if(_OPENCV_USE_FETCH)
         "${CMAKE_BINARY_DIR}"
     )
     set(OpenCV_LIBS opencv_core opencv_imgproc)
-
-    # Debug: verify paths exist
-    message(STATUS "OpenCV source dir: ${opencv_SOURCE_DIR}")
-    message(STATUS "OpenCV binary dir: ${opencv_BINARY_DIR}")
-    foreach(_dir ${OpenCV_INCLUDE_DIRS})
-        if(EXISTS "${_dir}")
-            message(STATUS "  [OK] ${_dir}")
-        else()
-            message(WARNING "  [MISSING] ${_dir}")
-        endif()
-    endforeach()
-    if(EXISTS "${opencv_SOURCE_DIR}/modules/core/include/opencv2/core.hpp")
-        message(STATUS "  [OK] opencv2/core.hpp found")
-    else()
-        message(WARNING "  [MISSING] opencv2/core.hpp NOT found!")
-    endif()
     message(STATUS "OpenCV fetched and configured (core + imgproc only)")
 endif()
 
-# ─────────────────────────────────────────────
-# Windows SDK (DXGI, D3D11, XInput)
-# ─────────────────────────────────────────────
-# These ship with the Windows SDK / MSVC.
-# For MinGW, the Windows API headers and libs are provided by mingw-w64.
-
-# ─────────────────────────────────────────────
-# CUDA (optional – only for ONNX Runtime EP linkage hints)
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────
+# CUDA (optional - runtime hint for ONNX Runtime EP)
+# ─────────────────────────────────────────────────────────────────────
 if(USE_CUDA)
     find_package(CUDAToolkit QUIET)
     if(CUDAToolkit_FOUND)
         message(STATUS "CUDA Toolkit found: ${CUDAToolkit_VERSION}")
     else()
-        message(WARNING "CUDA Toolkit not found – ONNX Runtime will still "
+        message(WARNING "CUDA Toolkit not found - ONNX Runtime will still "
                         "attempt to load the CUDA EP at runtime via its DLLs.")
     endif()
 endif()
 
-# ─────────────────────────────────────────────
-# Source files
-# ─────────────────────────────────────────────
-set(SOURCES
-    src/main.cpp
-    src/capture/dxgi_capture.cpp
-    src/inference/onnx_detector.cpp
-    src/tracking/kalman_tracker.cpp
-    src/input/gamepad_controller.cpp
-)
+# ─────────────────────────────────────────────────────────────────────
+# Source: single-file architecture
+# ─────────────────────────────────────────────────────────────────────
+set(SOURCES src/main.cpp)
 
 add_executable(${PROJECT_NAME} ${SOURCES})
 
 target_include_directories(${PROJECT_NAME} PRIVATE
-    ${CMAKE_SOURCE_DIR}/include
     ${ONNXRUNTIME_INCLUDE_DIR}
     ${VIGEMCLIENT_INCLUDE_DIR}
     ${OpenCV_INCLUDE_DIRS}
 )
 
-# Debug: show all include directories for the main target
-get_target_property(_ALL_INCS ${PROJECT_NAME} INCLUDE_DIRECTORIES)
-message(STATUS "Target include directories: ${_ALL_INCS}")
-
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────
 # Link libraries
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────
 target_link_libraries(${PROJECT_NAME} PRIVATE
     onnxruntime_imported
     ${VIGEMCLIENT_LIB}
     ${OpenCV_LIBS}
 )
 
-# Windows system libraries (works for both MSVC and MinGW)
 if(WIN32)
     target_link_libraries(${PROJECT_NAME} PRIVATE
         d3d11
@@ -326,9 +278,9 @@ if(WIN32)
     )
 endif()
 
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────
 # Compile definitions
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────
 if(USE_CUDA)
     target_compile_definitions(${PROJECT_NAME} PRIVATE USE_CUDA=1)
 endif()
@@ -338,9 +290,6 @@ endif()
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE UNICODE _UNICODE)
 
-# Prevent Windows.h from defining min/max macros that conflict with
-# std::min, std::max, std::clamp (causes C2589/C2059 errors).
-# WIN32_LEAN_AND_MEAN reduces Windows.h bloat and speeds compilation.
 if(WIN32)
     target_compile_definitions(${PROJECT_NAME} PRIVATE
         NOMINMAX
@@ -348,11 +297,10 @@ if(WIN32)
     )
 endif()
 
-# ─────────────────────────────────────────────
-# Compiler-specific flags
-# ─────────────────────────────────────────────
-# Release optimization flags use generator expressions so they NEVER
-# apply to Debug builds (avoids /RTC1 vs /O2 conflict).
+# ─────────────────────────────────────────────────────────────────────
+# Compiler flags: Release optimisation with AVX2 + fp:fast
+# Generator expressions ensure these NEVER apply to Debug builds.
+# ─────────────────────────────────────────────────────────────────────
 if(MSVC)
     target_compile_options(${PROJECT_NAME} PRIVATE
         /W4
@@ -379,42 +327,18 @@ else()
     )
 endif()
 
-# ─────────────────────────────────────────────
-# Post-build: copy ALL required DLLs next to executable
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────
+# Post-build: copy DLLs next to executable
+# ─────────────────────────────────────────────────────────────────────
 if(WIN32)
-    # ONNX Runtime DLLs
     if(ONNXRUNTIME_ROOT)
         file(GLOB ORT_DLLS "${ONNXRUNTIME_ROOT}/lib/*.dll")
         foreach(dll ${ORT_DLLS})
             add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${dll}"
-                    "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
+                    "${dll}" "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
+                COMMENT "Copying ${dll}"
             )
         endforeach()
     endif()
-
-    # OpenCV DLLs (when built as shared libs via FetchContent)
-    if(_OPENCV_USE_FETCH)
-        foreach(_cv_target ${OpenCV_LIBS})
-            if(TARGET ${_cv_target})
-                add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                        "$<TARGET_FILE:${_cv_target}>"
-                        "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
-                )
-            endif()
-        endforeach()
-    endif()
 endif()
-
-message(STATUS "──────────────────────────────────────")
-message(STATUS "  RealtimeObjectTracker configuration")
-message(STATUS "  Compiler     : ${CMAKE_CXX_COMPILER_ID}")
-message(STATUS "  Generator    : ${CMAKE_GENERATOR}")
-message(STATUS "  CUDA EP      : ${USE_CUDA}")
-message(STATUS "  TensorRT EP  : ${USE_TENSORRT}")
-message(STATUS "  ONNX Runtime : ${ONNXRUNTIME_ROOT}")
-message(STATUS "  OpenCV       : ${OpenCV_DIR}")
-message(STATUS "──────────────────────────────────────")
