@@ -42,6 +42,9 @@
   #include <wrl/client.h>
   #include <Xinput.h>
   #include <ViGEm/Client.h>
+  #include <io.h>      // _dup, _dup2, _close, _fileno
+#else
+  #include <unistd.h>  // dup, dup2, close
 #endif
 
 // ====================================================================
@@ -481,6 +484,46 @@ public:
                         s + 1 < shape.size() ? "," : "");
                 std::printf("]\n");
             }
+
+            // ── Warmup inference (suppresses CUDA Conv Fallback warnings) ──
+            std::printf("[RT-DETR] Running warmup inference (suppressing CUDA warnings)...\n");
+            std::fflush(stdout);
+            {
+#ifdef _WIN32
+                // Redirect stderr to NUL during warmup
+                int saved_stderr = _dup(_fileno(stderr));
+                FILE* nul = nullptr;
+                freopen_s(&nul, "NUL", "w", stderr);
+#else
+                int saved_stderr = dup(fileno(stderr));
+                freopen("/dev/null", "w", stderr);
+#endif
+                // Run a dummy inference to trigger all cuDNN algo selection
+                std::vector<float> dummy(
+                    static_cast<std::size_t>(input_size_) * input_size_ * 3, 0.0f);
+                std::array<int64_t, 4> warmup_shape = {1, 3, input_size_, input_size_};
+                auto warmup_mem = Ort::MemoryInfo::CreateCpu(
+                    OrtArenaAllocator, OrtMemTypeDefault);
+                Ort::Value warmup_tensor = Ort::Value::CreateTensor<float>(
+                    warmup_mem, dummy.data(), dummy.size(),
+                    warmup_shape.data(), warmup_shape.size());
+                try {
+                    session_->Run(Ort::RunOptions{nullptr},
+                        in_names_.data(), &warmup_tensor, 1,
+                        out_names_.data(), out_names_.size());
+                } catch (...) { /* ignore warmup errors */ }
+
+                // Restore stderr
+                std::fflush(stderr);
+#ifdef _WIN32
+                _dup2(saved_stderr, _fileno(stderr));
+                _close(saved_stderr);
+#else
+                dup2(saved_stderr, fileno(stderr));
+                close(saved_stderr);
+#endif
+            }
+            std::printf("[RT-DETR] Warmup complete - CUDA kernels cached\n");
 
             return true;
         } catch (const Ort::Exception& e) {
