@@ -25,7 +25,11 @@ elseif(MSVC)
     # Force UTF-8 source and execution character sets globally.
     # Without this, Japanese Windows (code page 932) misinterprets UTF-8
     # source files, causing cascading C2530/C2143/C4430 compile errors.
-    add_compile_options(/utf-8)
+    # Use CMAKE_*_FLAGS to ensure these flags appear in every compilation
+    # command, including FetchContent-built dependencies like OpenCV.
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /utf-8 /wd4819")
+    set(CMAKE_C_FLAGS   "${CMAKE_C_FLAGS}   /utf-8 /wd4819")
+    add_compile_options(/utf-8 /wd4819)
 endif()
 
 # ─────────────────────────────────────────────
@@ -222,13 +226,14 @@ if(NOT OpenCV_FOUND)
     )
     FetchContent_MakeAvailable(opencv)
 
-    set(OpenCV_INCLUDE_DIRS
-        "${opencv_SOURCE_DIR}/include"
-        "${opencv_SOURCE_DIR}/modules/core/include"
-        "${opencv_SOURCE_DIR}/modules/imgproc/include"
-        "${opencv_BINARY_DIR}"
-    )
+    # When using FetchContent, opencv_core/opencv_imgproc CMake targets
+    # carry their own INTERFACE_INCLUDE_DIRECTORIES. We just need to
+    # link against them and CMake propagates includes automatically.
+    # Set OpenCV_LIBS for target_link_libraries; OpenCV_INCLUDE_DIRS
+    # is no longer needed (avoids stale/incomplete manual paths).
+    set(OpenCV_INCLUDE_DIRS "")
     set(OpenCV_LIBS opencv_core opencv_imgproc)
+    set(OPENCV_FETCHED TRUE)
     message(STATUS "OpenCV fetched and configured (core + imgproc only)")
 else()
     message(STATUS "OpenCV found: ${OpenCV_VERSION}")
