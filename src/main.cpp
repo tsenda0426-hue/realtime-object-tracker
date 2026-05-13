@@ -134,27 +134,27 @@ struct TrackedTarget {
 //  System configuration (all tuning constants in one place)
 // ====================================================================
 struct SystemConfig {
-    // Capture region (centered on screen)
-    int capture_width   = 400;
-    int capture_height  = 400;
+    // Capture region (centered on screen, wider for far tracking)
+    int capture_width   = 600;
+    int capture_height  = 600;
     int capture_offset_x = 0;   // computed at runtime
     int capture_offset_y = 0;
 
     // RT-DETR inference
     const char* model_path     = "rtdetr.onnx";
     int   infer_input_size     = 640;
-    float confidence_threshold = 0.45f;
+    float confidence_threshold = 0.30f;  // lower = detect targets further away
     int   target_class_id      = 0;      // COCO person=0
 
     // Kalman filter
-    int   max_lost_frames  = 20;
-    int   prediction_steps = 2;
+    int   max_lost_frames  = 60;       // tolerate more lost frames
+    int   prediction_steps = 4;        // predict further ahead
 
     // I/O control loop
-    float smoothing_alpha       = 0.35f;   // base EMA alpha
-    float decay_exponent        = 2.0f;    // pow decay curve
-    float max_correction_speed  = 25000.0f;
-    float deadzone_radius       = 3.0f;
+    float smoothing_alpha       = 0.12f;    // very low = ultra-smooth output
+    float decay_exponent        = 0.6f;     // < 1.0 = strong at all distances
+    float max_correction_speed  = 80000.0f; // extreme correction force
+    float deadzone_radius       = 0.5f;     // almost no deadzone = track from far
 };
 
 // ====================================================================
