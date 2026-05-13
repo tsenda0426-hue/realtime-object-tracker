@@ -19,6 +19,7 @@
 #include <cstdio>
 #include <cstring>
 #include <csignal>
+#include <cstdlib>
 #include <mutex>
 #include <numeric>
 #include <optional>
@@ -356,7 +357,11 @@ public:
 
         try {
             env_ = std::make_unique<Ort::Env>(
-                ORT_LOGGING_LEVEL_ERROR, "RT_DETR_Tracker");
+                ORT_LOGGING_LEVEL_FATAL, "RT_DETR_Tracker");
+            // Suppress ALL internal ONNX Runtime warnings including
+            // CUDA Conv Fallback messages from conv.cc
+            Ort::GetApi().SetLanguageProjection(
+                env_->operator OrtEnv*(), OrtLanguageProjection::ORT_PROJECTION_CPLUSPLUS);
 
             opts_ = std::make_unique<Ort::SessionOptions>();
             opts_->SetIntraOpNumThreads(2);
@@ -1325,8 +1330,12 @@ int main(int argc, char* argv[]) {
         std::signal(SIGTERM, signal_handler);
 
 #ifdef _WIN32
+        // Suppress all ONNX Runtime internal warnings (Conv Fallback etc.)
+        _putenv_s("ORT_LOG_LEVEL", "4");
         // Raise timer resolution to 1 ms for the I/O thread
         timeBeginPeriod(1);
+#else
+        setenv("ORT_LOG_LEVEL", "4", 1);
 #endif
 
         std::printf("===========================================================\n");
