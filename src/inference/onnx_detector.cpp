@@ -188,18 +188,53 @@ std::vector<Detection> OnnxDetector::postprocess(
         const float* output_data,
         const std::vector<int64_t>& output_shape,
         int orig_w, int orig_h) {
-    // YOLOv8 output shape: [1, num_classes+4, num_boxes]
-    // Rows 0-3: cx, cy, w, h (in model input coordinates)
-    // Rows 4+: class confidences
+    // Dynamically handle YOLOv8 output shapes:
+    //   Format A (standard): [1, num_features, num_boxes]  e.g. [1, 84, 8400]
+    //   Format B (transposed): [1, num_boxes, num_features] e.g. [1, 8400, 84]
     std::vector<Detection> detections;
 
-    if (output_shape.size() < 3) return detections;
+    if (output_shape.size() < 2) {
+        std::fprintf(stderr, "[OnnxDetector] Unexpected output rank: %zu\n",
+                     output_shape.size());
+        return detections;
+    }
 
-    const int64_t num_features = output_shape[1]; // 4 + num_classes
-    const int64_t num_boxes    = output_shape[2];
-    const int64_t num_classes  = num_features - 4;
+    // Handle both 2D and 3D output tensors
+    int64_t dim1, dim2;
+    if (output_shape.size() == 2) {
+        dim1 = output_shape[0];
+        dim2 = output_shape[1];
+    } else {
+        dim1 = output_shape[1];
+        dim2 = output_shape[2];
+    }
 
-    if (num_classes <= 0) return detections;
+    int64_t num_features, num_boxes;
+    bool transposed;
+
+    if (dim1 > dim2) {
+        // Format B: [1, num_boxes, num_features]
+        num_boxes    = dim1;
+        num_features = dim2;
+        transposed   = true;
+    } else {
+        // Format A: [1, num_features, num_boxes]
+        num_features = dim1;
+        num_boxes    = dim2;
+        transposed   = false;
+    }
+
+    const int64_t num_classes = num_features - 4;
+
+    if (num_classes <= 0 || num_boxes <= 0) {
+        std::fprintf(stderr, "[OnnxDetector] Invalid output dims: "
+                     "features=%lld boxes=%lld\n",
+                     static_cast<long long>(num_features),
+                     static_cast<long long>(num_boxes));
+        return detections;
+    }
+
+    const int64_t total_elements = num_features * num_boxes;
 
     // Scale factors (letterbox -> original image)
     const float scale = std::min(
@@ -210,11 +245,19 @@ std::vector<Detection> OnnxDetector::postprocess(
     const float pad_y = (static_cast<float>(input_size_) - static_cast<float>(orig_h) * scale) * 0.5f;
 
     for (int64_t i = 0; i < num_boxes; ++i) {
-        // Find max class score
         float max_score = 0.0f;
         int   max_cls   = 0;
+
         for (int64_t c = 0; c < num_classes; ++c) {
-            const float score = output_data[(4 + c) * num_boxes + i];
+            int64_t idx;
+            if (transposed) {
+                idx = i * num_features + (4 + c);
+            } else {
+                idx = (4 + c) * num_boxes + i;
+            }
+            if (idx < 0 || idx >= total_elements) continue;
+
+            const float score = output_data[idx];
             if (score > max_score) {
                 max_score = score;
                 max_cls   = static_cast<int>(c);
@@ -224,23 +267,37 @@ std::vector<Detection> OnnxDetector::postprocess(
         if (max_score < conf_threshold_) continue;
         if (max_cls != target_class_)    continue;
 
-        // Extract box in model coordinates
-        float cx = output_data[0 * num_boxes + i];
-        float cy = output_data[1 * num_boxes + i];
-        float w  = output_data[2 * num_boxes + i];
-        float h  = output_data[3 * num_boxes + i];
+        // Extract box coordinates with bounds checking
+        float cx_val, cy_val, w_val, h_val;
+        if (transposed) {
+            int64_t base = i * num_features;
+            if (base + 3 >= total_elements) continue;
+            cx_val = output_data[base + 0];
+            cy_val = output_data[base + 1];
+            w_val  = output_data[base + 2];
+            h_val  = output_data[base + 3];
+        } else {
+            cx_val = output_data[0 * num_boxes + i];
+            cy_val = output_data[1 * num_boxes + i];
+            w_val  = output_data[2 * num_boxes + i];
+            h_val  = output_data[3 * num_boxes + i];
+        }
 
-        // Remove padding and rescale to original image coordinates
-        cx = (cx - pad_x) / scale;
-        cy = (cy - pad_y) / scale;
-        w  = w / scale;
-        h  = h / scale;
+        // Remove padding and rescale to original coordinates
+        cx_val = (cx_val - pad_x) / scale;
+        cy_val = (cy_val - pad_y) / scale;
+        w_val  = w_val / scale;
+        h_val  = h_val / scale;
+
+        // Skip invalid boxes
+        if (w_val <= 0.0f || h_val <= 0.0f) continue;
+        if (!std::isfinite(cx_val) || !std::isfinite(cy_val)) continue;
 
         Detection det;
-        det.x          = cx;
-        det.y          = cy;
-        det.w          = w;
-        det.h          = h;
+        det.x          = cx_val;
+        det.y          = cy_val;
+        det.w          = w_val;
+        det.h          = h_val;
         det.confidence = max_score;
         det.class_id   = max_cls;
         detections.push_back(det);
