@@ -87,6 +87,35 @@ bool OnnxDetector::initialize(const char* model_path, int input_size,
             output_names_[i]     = output_names_str_[i].c_str();
         }
 
+        // Auto-detect model input size from the first input tensor shape
+        // This handles models with input_size != 640 (e.g. 416, 320, etc.)
+        if (num_inputs > 0) {
+            auto type_info = session_->GetInputTypeInfo(0);
+            auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
+            auto shape = tensor_info.GetShape();
+            // YOLOv8 input shape is typically [1, 3, H, W]
+            if (shape.size() >= 4 && shape[2] > 0 && shape[3] > 0) {
+                int model_h = static_cast<int>(shape[2]);
+                int model_w = static_cast<int>(shape[3]);
+                if (model_h == model_w && model_h != input_size_) {
+                    std::printf("[OnnxDetector] Auto-detected input size: "
+                                "%d (was %d)\n", model_h, input_size_);
+                    input_size_ = model_h;
+                } else if (model_h != model_w) {
+                    std::printf("[OnnxDetector] Non-square input: %dx%d, "
+                                "using max=%d\n", model_w, model_h,
+                                std::max(model_w, model_h));
+                    input_size_ = std::max(model_w, model_h);
+                }
+            }
+            std::printf("[OnnxDetector] Input shape: [");
+            for (size_t s = 0; s < shape.size(); ++s) {
+                std::printf("%lld%s", static_cast<long long>(shape[s]),
+                            s + 1 < shape.size() ? ", " : "");
+            }
+            std::printf("] -> input_size=%d\n", input_size_);
+        }
+
         std::printf("[OnnxDetector] Model loaded: %s (%zu inputs, %zu outputs)\n",
                     model_path, num_inputs, num_outputs);
         return true;
