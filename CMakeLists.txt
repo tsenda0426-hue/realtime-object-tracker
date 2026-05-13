@@ -226,14 +226,17 @@ if(NOT OpenCV_FOUND)
     )
     FetchContent_MakeAvailable(opencv)
 
-    # When using FetchContent, opencv_core/opencv_imgproc CMake targets
-    # carry their own INTERFACE_INCLUDE_DIRECTORIES. We just need to
-    # link against them and CMake propagates includes automatically.
-    # Set OpenCV_LIBS for target_link_libraries; OpenCV_INCLUDE_DIRS
-    # is no longer needed (avoids stale/incomplete manual paths).
-    set(OpenCV_INCLUDE_DIRS "")
+    # Manually set include paths for OpenCV built via FetchContent.
+    # The generated config headers (cvconfig.h, opencv_modules.hpp) live
+    # under ${opencv_BINARY_DIR}. Module headers are under modules/*/include.
+    set(OpenCV_INCLUDE_DIRS
+        "${opencv_SOURCE_DIR}/include"
+        "${opencv_SOURCE_DIR}/modules/core/include"
+        "${opencv_SOURCE_DIR}/modules/imgproc/include"
+        "${opencv_BINARY_DIR}"
+        "${opencv_BINARY_DIR}/configHeaders"
+    )
     set(OpenCV_LIBS opencv_core opencv_imgproc)
-    set(OPENCV_FETCHED TRUE)
     message(STATUS "OpenCV fetched and configured (core + imgproc only)")
 else()
     message(STATUS "OpenCV found: ${OpenCV_VERSION}")
