@@ -1,10 +1,16 @@
 #include "inference/onnx_detector.h"
+
+#ifdef _WIN32
+#include <Windows.h>
+#endif
+
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 #include <algorithm>
 #include <numeric>
 #include <cmath>
 #include <cstdio>
+#include <stdexcept>
 
 namespace tracker {
 
@@ -81,12 +87,47 @@ bool OnnxDetector::initialize(const char* model_path, int input_size,
             output_names_[i]     = output_names_str_[i].c_str();
         }
 
+        // Auto-detect model input size from the first input tensor shape
+        // This handles models with input_size != 640 (e.g. 416, 320, etc.)
+        if (num_inputs > 0) {
+            auto type_info = session_->GetInputTypeInfo(0);
+            auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
+            auto shape = tensor_info.GetShape();
+            // YOLOv8 input shape is typically [1, 3, H, W]
+            if (shape.size() >= 4 && shape[2] > 0 && shape[3] > 0) {
+                int model_h = static_cast<int>(shape[2]);
+                int model_w = static_cast<int>(shape[3]);
+                if (model_h == model_w && model_h != input_size_) {
+                    std::printf("[OnnxDetector] Auto-detected input size: "
+                                "%d (was %d)\n", model_h, input_size_);
+                    input_size_ = model_h;
+                } else if (model_h != model_w) {
+                    std::printf("[OnnxDetector] Non-square input: %dx%d, "
+                                "using max=%d\n", model_w, model_h,
+                                std::max(model_w, model_h));
+                    input_size_ = std::max(model_w, model_h);
+                }
+            }
+            std::printf("[OnnxDetector] Input shape: [");
+            for (size_t s = 0; s < shape.size(); ++s) {
+                std::printf("%lld%s", static_cast<long long>(shape[s]),
+                            s + 1 < shape.size() ? ", " : "");
+            }
+            std::printf("] -> input_size=%d\n", input_size_);
+        }
+
         std::printf("[OnnxDetector] Model loaded: %s (%zu inputs, %zu outputs)\n",
                     model_path, num_inputs, num_outputs);
         return true;
 
     } catch (const Ort::Exception& e) {
         std::fprintf(stderr, "[OnnxDetector] ONNX Runtime error: %s\n", e.what());
+        return false;
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[OnnxDetector] Initialization error: %s\n", e.what());
+        return false;
+    } catch (...) {
+        std::fprintf(stderr, "[OnnxDetector] Unknown initialization error\n");
         return false;
     }
 }
@@ -98,7 +139,7 @@ void OnnxDetector::preprocess(const uint8_t* bgra_data,
     cv::Mat bgra(img_height, img_width, CV_8UC4,
                  const_cast<uint8_t*>(bgra_data), img_stride);
 
-    // BGRA → RGB
+    // BGRA -> RGB
     cv::Mat rgb;
     cv::cvtColor(bgra, rgb, cv::COLOR_BGRA2RGB);
 
@@ -118,7 +159,7 @@ void OnnxDetector::preprocess(const uint8_t* bgra_data,
     const int dy = (input_size_ - new_h) / 2;
     resized.copyTo(padded(cv::Rect(dx, dy, new_w, new_h)));
 
-    // HWC → CHW, normalize to [0,1]
+    // HWC -> CHW, normalize to [0,1]
     blob.resize(static_cast<size_t>(3 * input_size_ * input_size_));
     const int area = input_size_ * input_size_;
     for (int y = 0; y < input_size_; ++y) {
@@ -137,51 +178,94 @@ std::vector<Detection> OnnxDetector::detect(const uint8_t* bgra_data,
                                              int img_stride) {
     if (!session_) return {};
 
-    // Pre-process
-    std::vector<float> blob;
-    preprocess(bgra_data, img_width, img_height, img_stride, blob);
+    try {
+        // Pre-process
+        std::vector<float> blob;
+        preprocess(bgra_data, img_width, img_height, img_stride, blob);
 
-    // Create input tensor
-    std::array<int64_t, 4> input_shape = {1, 3, input_size_, input_size_};
-    Ort::MemoryInfo mem_info = Ort::MemoryInfo::CreateCpu(
-        OrtArenaAllocator, OrtMemTypeDefault);
+        // Create input tensor
+        std::array<int64_t, 4> input_shape = {1, 3, input_size_, input_size_};
+        Ort::MemoryInfo mem_info = Ort::MemoryInfo::CreateCpu(
+            OrtArenaAllocator, OrtMemTypeDefault);
 
-    Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
-        mem_info, blob.data(), blob.size(),
-        input_shape.data(), input_shape.size());
+        Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
+            mem_info, blob.data(), blob.size(),
+            input_shape.data(), input_shape.size());
 
-    // Run inference
-    auto output_tensors = session_->Run(
-        Ort::RunOptions{nullptr},
-        input_names_.data(), &input_tensor, 1,
-        output_names_.data(), output_names_.size());
+        // Run inference
+        auto output_tensors = session_->Run(
+            Ort::RunOptions{nullptr},
+            input_names_.data(), &input_tensor, 1,
+            output_names_.data(), output_names_.size());
 
-    // Extract output
-    const float* output_data = output_tensors[0].GetTensorData<float>();
-    auto shape_info = output_tensors[0].GetTensorTypeAndShapeInfo();
-    auto output_shape = shape_info.GetShape();
+        // Extract output
+        const float* output_data = output_tensors[0].GetTensorData<float>();
+        auto shape_info = output_tensors[0].GetTensorTypeAndShapeInfo();
+        auto output_shape = shape_info.GetShape();
 
-    return postprocess(output_data, output_shape, img_width, img_height);
+        return postprocess(output_data, output_shape, img_width, img_height);
+    } catch (const Ort::Exception& e) {
+        std::fprintf(stderr, "[OnnxDetector] Inference error: %s\n", e.what());
+        return {};
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[OnnxDetector] Detection error: %s\n", e.what());
+        return {};
+    }
 }
 
 std::vector<Detection> OnnxDetector::postprocess(
         const float* output_data,
         const std::vector<int64_t>& output_shape,
         int orig_w, int orig_h) {
-    // YOLOv8 output shape: [1, num_classes+4, num_boxes]
-    // Rows 0-3: cx, cy, w, h (in model input coordinates)
-    // Rows 4+: class confidences
+    // Dynamically handle YOLOv8 output shapes:
+    //   Format A (standard): [1, num_features, num_boxes]  e.g. [1, 84, 8400]
+    //   Format B (transposed): [1, num_boxes, num_features] e.g. [1, 8400, 84]
     std::vector<Detection> detections;
 
-    if (output_shape.size() < 3) return detections;
+    if (output_shape.size() < 2) {
+        std::fprintf(stderr, "[OnnxDetector] Unexpected output rank: %zu\n",
+                     output_shape.size());
+        return detections;
+    }
 
-    const int64_t num_features = output_shape[1]; // 4 + num_classes
-    const int64_t num_boxes    = output_shape[2];
-    const int64_t num_classes  = num_features - 4;
+    // Handle both 2D and 3D output tensors
+    int64_t dim1, dim2;
+    if (output_shape.size() == 2) {
+        dim1 = output_shape[0];
+        dim2 = output_shape[1];
+    } else {
+        dim1 = output_shape[1];
+        dim2 = output_shape[2];
+    }
 
-    if (num_classes <= 0) return detections;
+    int64_t num_features, num_boxes;
+    bool transposed;
 
-    // Scale factors (letterbox → original image)
+    if (dim1 > dim2) {
+        // Format B: [1, num_boxes, num_features]
+        num_boxes    = dim1;
+        num_features = dim2;
+        transposed   = true;
+    } else {
+        // Format A: [1, num_features, num_boxes]
+        num_features = dim1;
+        num_boxes    = dim2;
+        transposed   = false;
+    }
+
+    const int64_t num_classes = num_features - 4;
+
+    if (num_classes <= 0 || num_boxes <= 0) {
+        std::fprintf(stderr, "[OnnxDetector] Invalid output dims: "
+                     "features=%lld boxes=%lld\n",
+                     static_cast<long long>(num_features),
+                     static_cast<long long>(num_boxes));
+        return detections;
+    }
+
+    const int64_t total_elements = num_features * num_boxes;
+
+    // Scale factors (letterbox -> original image)
     const float scale = std::min(
         static_cast<float>(input_size_) / static_cast<float>(orig_w),
         static_cast<float>(input_size_) / static_cast<float>(orig_h)
@@ -190,11 +274,19 @@ std::vector<Detection> OnnxDetector::postprocess(
     const float pad_y = (static_cast<float>(input_size_) - static_cast<float>(orig_h) * scale) * 0.5f;
 
     for (int64_t i = 0; i < num_boxes; ++i) {
-        // Find max class score
         float max_score = 0.0f;
         int   max_cls   = 0;
+
         for (int64_t c = 0; c < num_classes; ++c) {
-            const float score = output_data[(4 + c) * num_boxes + i];
+            int64_t idx;
+            if (transposed) {
+                idx = i * num_features + (4 + c);
+            } else {
+                idx = (4 + c) * num_boxes + i;
+            }
+            if (idx < 0 || idx >= total_elements) continue;
+
+            const float score = output_data[idx];
             if (score > max_score) {
                 max_score = score;
                 max_cls   = static_cast<int>(c);
@@ -204,23 +296,37 @@ std::vector<Detection> OnnxDetector::postprocess(
         if (max_score < conf_threshold_) continue;
         if (max_cls != target_class_)    continue;
 
-        // Extract box in model coordinates
-        float cx = output_data[0 * num_boxes + i];
-        float cy = output_data[1 * num_boxes + i];
-        float w  = output_data[2 * num_boxes + i];
-        float h  = output_data[3 * num_boxes + i];
+        // Extract box coordinates with bounds checking
+        float cx_val, cy_val, w_val, h_val;
+        if (transposed) {
+            int64_t base = i * num_features;
+            if (base + 3 >= total_elements) continue;
+            cx_val = output_data[base + 0];
+            cy_val = output_data[base + 1];
+            w_val  = output_data[base + 2];
+            h_val  = output_data[base + 3];
+        } else {
+            cx_val = output_data[0 * num_boxes + i];
+            cy_val = output_data[1 * num_boxes + i];
+            w_val  = output_data[2 * num_boxes + i];
+            h_val  = output_data[3 * num_boxes + i];
+        }
 
-        // Remove padding and rescale to original image coordinates
-        cx = (cx - pad_x) / scale;
-        cy = (cy - pad_y) / scale;
-        w  = w / scale;
-        h  = h / scale;
+        // Remove padding and rescale to original coordinates
+        cx_val = (cx_val - pad_x) / scale;
+        cy_val = (cy_val - pad_y) / scale;
+        w_val  = w_val / scale;
+        h_val  = h_val / scale;
+
+        // Skip invalid boxes
+        if (w_val <= 0.0f || h_val <= 0.0f) continue;
+        if (!std::isfinite(cx_val) || !std::isfinite(cy_val)) continue;
 
         Detection det;
-        det.x          = cx;
-        det.y          = cy;
-        det.w          = w;
-        det.h          = h;
+        det.x          = cx_val;
+        det.y          = cy_val;
+        det.w          = w_val;
+        det.h          = h_val;
         det.confidence = max_score;
         det.class_id   = max_cls;
         detections.push_back(det);

@@ -4,7 +4,7 @@
 
 namespace tracker {
 
-// ── Matrix utility implementations ──────────────────────────────────
+// -- Matrix utility implementations ----------------------------------
 void KalmanTracker::mat_multiply(const float* A, const float* B, float* C,
                                   int m, int n, int p) {
     for (int i = 0; i < m; ++i) {
@@ -57,7 +57,7 @@ void KalmanTracker::mat_zero(float* M, int rows, int cols) {
     std::memset(M, 0, sizeof(float) * static_cast<size_t>(rows * cols));
 }
 
-// ── Constructor ─────────────────────────────────────────────────────
+// -- Constructor -----------------------------------------------------
 KalmanTracker::KalmanTracker() {
     reset();
 }
@@ -70,19 +70,22 @@ void KalmanTracker::reset() {
     mat_identity(P_, STATE_DIM);
     for (int i = 0; i < STATE_DIM; ++i) P_[i * STATE_DIM + i] = 100.0f;
 
-    // Process noise (tuned for pixel-level tracking at ~144fps)
+    // Process noise: tuned for aggressive acceleration tracking.
+    // Higher values on acceleration channels let the filter react
+    // to sudden direction changes within sub-millisecond latency.
     mat_zero(Q_, STATE_DIM, STATE_DIM);
-    Q_[0 * STATE_DIM + 0] = 1.0f;    // x position
-    Q_[1 * STATE_DIM + 1] = 1.0f;    // y position
-    Q_[2 * STATE_DIM + 2] = 5.0f;    // vx
-    Q_[3 * STATE_DIM + 3] = 5.0f;    // vy
-    Q_[4 * STATE_DIM + 4] = 10.0f;   // ax
-    Q_[5 * STATE_DIM + 5] = 10.0f;   // ay
+    Q_[0 * STATE_DIM + 0] = 0.5f;    // x position
+    Q_[1 * STATE_DIM + 1] = 0.5f;    // y position
+    Q_[2 * STATE_DIM + 2] = 10.0f;   // vx - high for velocity tracking
+    Q_[3 * STATE_DIM + 3] = 10.0f;   // vy
+    Q_[4 * STATE_DIM + 4] = 50.0f;   // ax - very high for instant response
+    Q_[5 * STATE_DIM + 5] = 50.0f;   // ay - to acceleration changes
 
-    // Measurement noise
+    // Measurement noise: low values = high trust in ONNX detections.
+    // YOLO bounding box center is typically accurate to ~2-3 pixels.
     mat_zero(R_, MEAS_DIM, MEAS_DIM);
-    R_[0] = 4.0f;  // x measurement variance
-    R_[3] = 4.0f;  // y measurement variance
+    R_[0] = 2.0f;  // x measurement variance
+    R_[3] = 2.0f;  // y measurement variance
 }
 
 void KalmanTracker::initialize(float x, float y) {
@@ -107,12 +110,12 @@ void KalmanTracker::predict(double dt) {
     // ay = ay
     float F[STATE_DIM * STATE_DIM];
     mat_identity(F, STATE_DIM);
-    F[0 * STATE_DIM + 2] = t;    // x  ← vx
-    F[0 * STATE_DIM + 4] = t2;   // x  ← ax
-    F[1 * STATE_DIM + 3] = t;    // y  ← vy
-    F[1 * STATE_DIM + 5] = t2;   // y  ← ay
-    F[2 * STATE_DIM + 4] = t;    // vx ← ax
-    F[3 * STATE_DIM + 5] = t;    // vy ← ay
+    F[0 * STATE_DIM + 2] = t;    // x  <- vx
+    F[0 * STATE_DIM + 4] = t2;   // x  <- ax
+    F[1 * STATE_DIM + 3] = t;    // y  <- vy
+    F[1 * STATE_DIM + 5] = t2;   // y  <- ay
+    F[2 * STATE_DIM + 4] = t;    // vx <- ax
+    F[3 * STATE_DIM + 5] = t;    // vy <- ay
 
     // x_pred = F * x
     float x_pred[STATE_DIM];

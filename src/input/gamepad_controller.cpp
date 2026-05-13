@@ -13,7 +13,7 @@ GamepadController::~GamepadController() {
 #ifdef _WIN32
 
 bool GamepadController::initialize() {
-    // ── Scan XInput ports 0-3 and lock the first connected pad ──
+    // -- Scan XInput ports 0-3 and lock the first connected pad --
     XINPUT_STATE xi_state;
     for (DWORD port = 0; port < XUSER_MAX_COUNT; ++port) {
         if (XInputGetState(port, &xi_state) == ERROR_SUCCESS) {
@@ -28,7 +28,7 @@ bool GamepadController::initialize() {
         return false;
     }
 
-    // ── Initialize ViGEmClient ──
+    // -- Initialize ViGEmClient --
     vigem_client_ = vigem_alloc();
     if (!vigem_client_) {
         std::fprintf(stderr, "[Gamepad] vigem_alloc failed\n");
@@ -44,7 +44,7 @@ bool GamepadController::initialize() {
         return false;
     }
 
-    // ── Create virtual Xbox 360 controller ──
+    // -- Create virtual Xbox 360 controller --
     vigem_target_ = vigem_target_x360_alloc();
     if (!vigem_target_) {
         std::fprintf(stderr, "[Gamepad] vigem_target_x360_alloc failed\n");

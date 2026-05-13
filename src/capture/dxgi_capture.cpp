@@ -120,22 +120,46 @@ void DxgiCapture::shutdown() {
 }
 
 bool DxgiCapture::acquire_frame(CapturedFrame& out) {
-    if (!duplication_) return false;
+    // If duplication was lost, attempt recovery
+    if (!duplication_) {
+        if (!create_duplication() || !create_staging_texture()) {
+            return false;
+        }
+        std::printf("[DxgiCapture] Duplication recovered\n");
+    }
 
     Microsoft::WRL::ComPtr<IDXGIResource> desktop_resource;
     DXGI_OUTDUPL_FRAME_INFO frame_info;
 
-    // Timeout 0 ms for non-blocking; falls back to 1 ms to avoid busy spin
     HRESULT hr = duplication_->AcquireNextFrame(1, &frame_info, &desktop_resource);
+
     if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
-        return false; // no new frame
+        return false;
     }
-    if (FAILED(hr)) {
-        // Output may have been invalidated (resolution change, etc.)
-        std::fprintf(stderr, "[DxgiCapture] AcquireNextFrame failed: 0x%08lx – reinitializing\n", hr);
+
+    if (hr == DXGI_ERROR_ACCESS_LOST) {
+        std::fprintf(stderr, "[DxgiCapture] Access lost - recovering\n");
         duplication_.Reset();
-        create_duplication();
-        create_staging_texture();
+        staging_tex_.Reset();
+        return false;
+    }
+
+    if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
+        std::fprintf(stderr, "[DxgiCapture] Device lost (0x%08lx) - full reinit\n", hr);
+        duplication_.Reset();
+        staging_tex_.Reset();
+        device_.Reset();
+        context_.Reset();
+        if (create_device() && create_duplication() && create_staging_texture()) {
+            std::printf("[DxgiCapture] Device reinitialized\n");
+        }
+        return false;
+    }
+
+    if (FAILED(hr)) {
+        std::fprintf(stderr, "[DxgiCapture] AcquireNextFrame: 0x%08lx\n", hr);
+        duplication_.Reset();
+        staging_tex_.Reset();
         return false;
     }
 
@@ -143,6 +167,12 @@ bool DxgiCapture::acquire_frame(CapturedFrame& out) {
     Microsoft::WRL::ComPtr<ID3D11Texture2D> desktop_tex;
     hr = desktop_resource.As(&desktop_tex);
     if (FAILED(hr)) {
+        duplication_->ReleaseFrame();
+        return false;
+    }
+
+    // Validate staging texture exists
+    if (!staging_tex_) {
         duplication_->ReleaseFrame();
         return false;
     }
@@ -165,6 +195,7 @@ bool DxgiCapture::acquire_frame(CapturedFrame& out) {
     D3D11_MAPPED_SUBRESOURCE mapped;
     hr = context_->Map(staging_tex_.Get(), 0, D3D11_MAP_READ, 0, &mapped);
     if (FAILED(hr)) {
+        std::fprintf(stderr, "[DxgiCapture] Map staging failed: 0x%08lx\n", hr);
         duplication_->ReleaseFrame();
         return false;
     }

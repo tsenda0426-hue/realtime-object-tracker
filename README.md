@@ -42,30 +42,53 @@
 
 | ライブラリ | 入手先 |
 |-----------|--------|
-| ONNX Runtime GPU | https://github.com/microsoft/onnxruntime/releases |
-| OpenCV 4.x | https://opencv.org/releases/ |
-| ViGEmClient | https://github.com/ViGEm/ViGEmClient (FetchContentで自動取得) |
+| ONNX Runtime GPU | FetchContentで自動取得 (手動: https://github.com/microsoft/onnxruntime/releases) |
+| OpenCV 4.x | FetchContentで自動取得 (手動: https://opencv.org/releases/) |
+| ViGEmClient | FetchContentで自動取得 |
 | ViGEmBus Driver | https://github.com/ViGEm/ViGEmBus/releases (要インストール) |
 | CUDA Toolkit | https://developer.nvidia.com/cuda-downloads |
 | YOLOv8 ONNX | Ultralytics等でエクスポート |
 
 ## ビルド手順
 
+全依存ライブラリ (ONNX Runtime, OpenCV, ViGEmClient) は自動ダウンロードされます。
+初回は ONNX Runtime SDK (~300MB) と OpenCV のダウンロード+ビルドで数分かかります。
+
+### MSVC (Visual Studio)
 ```powershell
-# 1. 依存ライブラリのパスを設定してCMake configure
-cmake -B build -G "Visual Studio 17 2022" -A x64 ^
-  -DONNXRUNTIME_ROOT="C:/onnxruntime-win-x64-gpu-1.17.0" ^
-  -DOpenCV_DIR="C:/opencv/build" ^
-  -DUSE_CUDA=ON
-
-# 2. ビルド
+cmake -B build -G "Visual Studio 17 2022" -A x64 -DUSE_CUDA=ON
 cmake --build build --config Release
+```
 
-# 3. YOLOv8 ONNXモデルを実行ファイルと同じディレクトリに配置
-copy yolov8n.onnx build\Release\
+### MinGW (CLion / コマンドライン)
+```bash
+# MinGW Makefiles を使用（Ninja ではなく）
+cmake -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DUSE_CUDA=ON
+cmake --build build
 
-# 4. 実行
-build\Release\RealtimeObjectTracker.exe [model_path]
+# または CMakePresets を使用
+cmake --preset mingw-release
+cmake --build --preset mingw-release-build
+```
+
+**CLion で使う場合:**
+1. CLion でプロジェクトフォルダを開く
+2. `Settings > Build > CMake` で Generator を **"MinGW Makefiles"** に変更
+3. または `CMakePresets.json` が自動検出されるので、プリセットを選択
+
+### 共通
+```powershell
+# YOLOv8 ONNXモデルを実行ファイルと同じディレクトリに配置
+copy yolov8n.onnx build\RealtimeObjectTracker.exe のあるディレクトリ
+
+# 実行
+RealtimeObjectTracker.exe [model_path]
+```
+
+### オプション: ローカルSDKパス指定（高速化）
+```
+-DONNXRUNTIME_ROOT="C:/onnxruntime-win-x64-gpu-1.22.0"
+-DOpenCV_DIR="C:/opencv/build"
 ```
 
 ## 補正ロジック詳細
