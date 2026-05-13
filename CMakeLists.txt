@@ -233,11 +233,16 @@ if(_OPENCV_USE_FETCH)
     FetchContent_MakeAvailable(opencv)
 
     # Include paths for FetchContent-built OpenCV.
+    # IMPORTANT: OpenCV generates opencv2/opencv_modules.hpp and cvconfig.h
+    # in CMAKE_BINARY_DIR (top-level build dir), NOT in opencv_BINARY_DIR.
+    # This is because OpenCV's CMakeLists.txt uses CMAKE_BINARY_DIR for
+    # OPENCV_CONFIG_FILE_INCLUDE_DIR.
     set(OpenCV_INCLUDE_DIRS
         "${opencv_SOURCE_DIR}/include"
         "${opencv_SOURCE_DIR}/modules/core/include"
         "${opencv_SOURCE_DIR}/modules/imgproc/include"
         "${opencv_BINARY_DIR}"
+        "${CMAKE_BINARY_DIR}"
     )
     set(OpenCV_LIBS opencv_core opencv_imgproc)
 
